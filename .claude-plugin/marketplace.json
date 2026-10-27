@@ -1,0 +1,5 @@
+{
+  "name": "session-watcher",
+  "owner": { "name": "machinataph-hash" },
+  "plugins": [{ "name": "session-watcher", "source": "./" }]
+}

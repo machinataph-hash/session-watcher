@@ -1,0 +1,7 @@
+{
+  "name": "session-watcher",
+  "version": "0.1.0",
+  "description": "Session Watcher: session vitals, real cost, token use per task and per request, sub-agents, permissions and an activity log in one pane",
+  "license": "MIT",
+  "types": "./types/index.d.ts"
+}
