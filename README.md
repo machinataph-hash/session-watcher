@@ -2,6 +2,8 @@
 
 A Claude Code mod that shows one pane with everything about the current session. It combines the token-use mod with ideas from [Flightdeck](https://github.com/scasella/claude-flightdeck).
 
+<p align="center"><img src="docs/session-watcher.png" alt="The Session Watcher pane: vitals with context, cost and rate limits, then session totals, tasks and recent requests" width="520"></p>
+
 ## Install
 
 At the prompt of a Claude Code terminal session:
