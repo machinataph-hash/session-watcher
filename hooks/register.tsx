@@ -690,22 +690,26 @@ export const register: Register = on => {
       </Box>
     )
 
-    // ---- token kinds: one row per kind, its share of the weighted cost
+    // ---- token kinds: one row per kind; the bar and % are its share of all tokens, COST its share of the weighted cost
     const KIND_W = 11
     const kinds = (key: string, u: Usage, room = inner) => {
-      const total = weighted(u)
+      const tokens = u.input + u.cacheWrite + u.cacheRead + u.output
+      const cost = weighted(u)
       const hasTokens = room >= 36
-      const barW = room - KIND_W - 1 - (hasTokens ? 8 : 0) - 6
+      const hasCost = room >= 30
+      const barW = room - KIND_W - 1 - (hasTokens ? 8 : 0) - 6 - (hasCost ? 6 : 0)
       return (
         <Box key={key} flexDirection="column">
           <Box key="head" flexDirection="row" gap={1}>
             <Box width={KIND_W} flexShrink={0}>{heading('k', 'KIND')}</Box>
-            <Box flexGrow={1} flexShrink={1} minWidth={0}>{heading('b', barW >= 28 ? 'SHARE OF WEIGHTED COST' : 'SHARE')}</Box>
+            <Box flexGrow={1} flexShrink={1} minWidth={0}>{heading('b', barW >= 20 ? 'SHARE OF TOKENS' : 'SHARE')}</Box>
             {hasTokens && cell('t', 7, heading('t', 'TOKENS'))}
             {cell('p', 5, heading('p', '%'))}
+            {hasCost && cell('c', 5, heading('c', 'COST'))}
           </Box>
           {KINDS.map(kd => {
-            const share = total > 0 ? (kd.weight * u[kd.field]) / total : 0
+            const share = tokens > 0 ? u[kd.field] / tokens : 0
+            const costShare = cost > 0 ? (kd.weight * u[kd.field]) / cost : 0
             return (
               <Box key={kd.field} flexDirection="row" gap={1} alignItems="center">
                 <Box width={KIND_W} flexShrink={0}>
@@ -715,7 +719,8 @@ export const register: Register = on => {
                   {strip('bar', [{ value: share, color: kd.color }], { track: true, cells: barW })}
                 </Box>
                 {hasTokens && cell('t', 7, n(k(u[kd.field])))}
-                {cell('p', 5, n(`${Math.round(100 * share)}%`, { dim: true }))}
+                {cell('p', 5, n(`${Math.round(100 * share)}%`))}
+                {hasCost && cell('c', 5, n(`${Math.round(100 * costShare)}%`, { dim: true }))}
               </Box>
             )
           })}
