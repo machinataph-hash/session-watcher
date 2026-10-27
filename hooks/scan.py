@@ -77,7 +77,9 @@ def read(path, is_agent, events):
                     who = 'agents' if is_agent or o.get('isSidechain') else 'main'
                     prev = responses.get(key)
                     vals = {f: int(u.get(src) or 0) for f, src in FIELDS}
-                    vals['cacheWrite1h'] = int((u.get('cache_creation') or {}).get('ephemeral_1h_input_tokens') or 0)
+                    split = u.get('cache_creation')
+                    vals['cacheWrite1h'] = int((split or {}).get('ephemeral_1h_input_tokens') or 0)
+                    vals['split'] = 1 if isinstance(split, dict) else 0
                     if prev:
                         vals = {f: max(vals[f], prev[2][f]) for f in vals}
                     responses[key] = (who, model, vals, prev[3] if prev else stamp(o))
@@ -113,6 +115,10 @@ for at, end, prompt in events:
 
 by_model = {}
 for who, model, vals, _ in responses.values():
+    # a response without the split: main-thread writes are one-hour, a sub-agent's five-minute;
+    # either way never more one-hour writes than writes
+    one_h = vals['cacheWrite1h'] if vals.pop('split') else vals['cacheWrite'] if who == 'main' else 0
+    vals['cacheWrite1h'] = min(one_h, vals['cacheWrite'])
     m = by_model.setdefault(model, {
         'main': {'input': 0, 'cacheWrite': 0, 'cacheWrite1h': 0, 'cacheRead': 0, 'output': 0, 'calls': 0, 'usd': 0},
         'agents': {'input': 0, 'cacheWrite': 0, 'cacheWrite1h': 0, 'cacheRead': 0, 'output': 0, 'calls': 0, 'usd': 0},
@@ -121,7 +127,10 @@ for who, model, vals, _ in responses.values():
     for f in vals:
         row[f] += vals[f]
     row['calls'] += 1
-main = sorted((at, vals) for who, _, vals, at in responses.values() if who == 'main' and at is not None)
+# placeholder lines with no tokens at all are not requests the cache saw
+main = sorted(((at, vals) for who, _, vals, at in responses.values()
+               if who == 'main' and at is not None and vals['input'] + vals['cacheWrite'] + vals['cacheRead'] > 0),
+              key=lambda r: r[0])
 summaries.sort()
 first = (main[0][1]['input'] + main[0][1]['cacheWrite'] + main[0][1]['cacheRead']) if main else 0
 rebuilds, count, written, prev_at, si = [], 0, 0, None, 0

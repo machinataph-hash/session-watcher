@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
-import { fromModel, weighted } from './core'
+import { fromModel, usdOf, weighted } from './core'
 
 const pane = { title: '', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} } as const
 const usage = { model: 'claude-opus-5-5', input_tokens: 1000, output_tokens: 2000, cache_read_input_tokens: 100000, cache_creation_input_tokens: 4000 }
@@ -96,6 +96,11 @@ test('cache writes are priced by cache length', async () => {
   // a split on the response wins: 400 one-hour + 600 five-minute
   const split = { ...m, cache_creation: { ephemeral_1h_input_tokens: 400, ephemeral_5m_input_tokens: 600 } }
   expect(weighted(fromModel('claude-opus-5-5', split as never, false))).toBe(1550)
+  // dollars use the same ratio: a one-hour write costs 2 / 1.25 = 1.6 times a five-minute one
+  const w = { input: 0, cacheWrite: 1000, cacheRead: 0, output: 0 }
+  expect(Math.round(usdOf('claude-opus-5-5', { ...w, cacheWrite1h: 1000 }) / usdOf('claude-opus-5-5', w) * 1000)).toBe(1600)
+  // a split larger than the write is capped at the write
+  expect(weighted(fromModel('claude-opus-5-5', { ...m, cache_creation: { ephemeral_1h_input_tokens: 5000 } } as never, false))).toBe(2000)
   // usage stored before the split was kept prices every write at 1.25x
   expect(weighted({ input: 0, cacheWrite: 1000, cacheRead: 0, output: 0, calls: 1, usd: 0 })).toBe(1250)
 })

@@ -40,7 +40,7 @@ export const fromModel = (model: string, m: ModelUsage, isMain: boolean): Usage 
   const u = {
     input: m.input_tokens ?? 0,
     cacheWrite,
-    cacheWrite1h: split ? (split.ephemeral_1h_input_tokens ?? 0) : isMain ? cacheWrite : 0,
+    cacheWrite1h: Math.min(split ? (split.ephemeral_1h_input_tokens ?? 0) : isMain ? cacheWrite : 0, cacheWrite),
     cacheRead: m.cache_read_input_tokens ?? 0,
     output: m.output_tokens ?? 0,
   }
