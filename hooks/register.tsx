@@ -658,11 +658,12 @@ export const register: Register = on => {
       ...(ch && ch.memoryChars !== null && ch.memoryChars > MEMORY_MAX ? [`memory index ${k(ch.memoryChars)} chars (over ${MEMORY_MAX.toLocaleString('en-US')})`] : []),
       ...(turnReqs > TURN_MAX ? [`${turnReqs} requests this turn (over ${TURN_MAX})`] : []),
     ]
-    // The title folds away the stats row (cost, running for, active, requests); Session totals has the same figures.
+    // The title folds away the stats row (cost, running for, active, requests); Session totals keeps cost and requests.
     const vitalsOpen = !isOpen(VITALS_FOLDED)
     const vitalsCard = (
       <Box key="vitals" flexDirection="column" borderStyle="round" borderColor="claude" paddingX={1} gap={1}>
         <Box key="title" flexDirection="row" flexWrap="wrap" columnGap={2} justifyContent="space-between">
+          <Box flexGrow={1} flexShrink={1} minWidth={0}>
           <Button key="sec-vitals" plain onPress={() => void flip(VITALS_FOLDED)}>
             <Text bold wrap="truncate-end">
               <Text dimColor>{vitalsOpen ? '▾ ' : '▸ '}</Text>
@@ -672,6 +673,7 @@ export const register: Register = on => {
               {v.mode ? <Text dimColor>{` · ${v.mode}`}</Text> : ''}
             </Text>
           </Button>
+          </Box>
           <Text dimColor tabular>
             {v.isRunning ? 'working' : 'idle'}
             {v.ttftMs !== null ? ` · first token ${dur(v.ttftMs)}` : ''}

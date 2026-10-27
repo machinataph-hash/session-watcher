@@ -148,10 +148,11 @@ test('no cache line when every figure is inside its limit', async ($, on) => {
 })
 
 // Pressing the Vitals title folds away its stats row and keeps the context bar; pressing again brings it back.
-test('the Vitals stats row folds away', async ($, on) => {
+for (const surface of ['terminal', 'desktop'] as const)
+test(`${surface}: the Vitals stats row folds away`, async ($, on) => {
   mock.clock(on)
   await start($, on)
-  const ui = await mount($, 'terminal')
+  const ui = await mount($, surface)
   expect(await ui.find({ type: 'Text', text: /^RUNNING FOR$/ })).toBeDefined()
   await ui.press({ key: 'sec-vitals' })
   expect(await ui.find({ type: 'Text', text: /^RUNNING FOR$/ })).toBeUndefined()
