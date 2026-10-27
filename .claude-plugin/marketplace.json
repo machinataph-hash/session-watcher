@@ -1,6 +1,10 @@
 {
   "name": "session-watcher",
-  "owner": { "name": "machinataph-hash", "url": "https://github.com/machinataph-hash" },
+  "description": "Session Watcher, a Claude Code mod: one pane for the session's cost, tokens, sub-agents, permissions and activity.",
+  "owner": {
+    "name": "machinataph-hash",
+    "url": "https://github.com/machinataph-hash"
+  },
   "plugins": [
     {
       "name": "session-watcher",
