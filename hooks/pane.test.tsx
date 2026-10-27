@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
-import { fromModel, usdOf, weighted } from './core'
+import { breakdownText, fromModel, usdOf, weighted } from './core'
 
 const pane = { title: '', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} } as const
 const usage = { model: 'claude-opus-5-5', input_tokens: 1000, output_tokens: 2000, cache_read_input_tokens: 100000, cache_creation_input_tokens: 4000 }
@@ -178,4 +178,32 @@ test('requests this turn past 15 show in Vitals', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: /requests this turn/ })).toBeUndefined()
   await step()
   expect(await ui.find({ type: 'Text', text: /16 requests this turn \(over 15\)/ })).toBeDefined()
+})
+
+test('context_breakdown: categories largest first, MCP tokens summed per server, loaded and deferred apart', async () => {
+  const text = breakdownText({
+    categories: [
+      { name: 'System prompt', tokens: 9000, color: '', isDeferred: false, kind: 'used' },
+      { name: 'MCP tools', tokens: 30000, color: '', isDeferred: false, kind: 'used' },
+      { name: 'MCP tools (deferred)', tokens: 50000, color: '', isDeferred: true, kind: 'deferred' },
+    ],
+    totalTokens: 39000, maxTokens: 300000, rawMaxTokens: 300000, autocompactSource: 'model' as never, percentage: 13, gridRows: [], model: 'opus',
+    memoryFiles: [{ path: 'MEMORY.md', type: 'AutoMem', tokens: 4500 }],
+    mcpTools: [
+      { name: 'mcp__a__x', serverName: 'a', tokens: 100, isLoaded: true },
+      { name: 'mcp__a__y', serverName: 'a', tokens: 50, isLoaded: false },
+      { name: 'mcp__b__z', serverName: 'b', tokens: 1000, isLoaded: false },
+    ],
+    agents: [{ agentType: 'r', source: 'user', tokens: 70 }],
+    skills: { totalSkills: 40, includedSkills: 38, tokens: 3000, skillFrontmatter: [] },
+    isAutoCompactEnabled: true, apiUsage: null,
+  } as never)
+  const lines = text.split('\n')
+  expect(lines[0]).toBe('Context 39,000 of 300,000 (opus)')
+  expect(lines[2]).toBe('  MCP tools (deferred): 50,000 (deferred)')
+  expect(lines[3]).toBe('  MCP tools: 30,000')
+  expect(text).toContain('  b: 0, 1,000, 1\n  a: 100, 50, 2')
+  expect(text).toContain('  MEMORY.md: 4,500')
+  expect(text).toContain('Agents: 70 over 1')
+  expect(text).toContain('Skills: 3,000, 38 of 40 listed')
 })

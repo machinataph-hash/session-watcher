@@ -54,6 +54,8 @@ It fits the space it has. On a narrow pane, rows drop their less important colum
 
 The mod adds a tool, `mark_task`. When Claude calls it with a label (for example "A2 build"), every later request from the main thread and from sub-agents counts toward that task until the next call. The tool returns the totals of the task that just ended. A sub-agent stays with the task it started under. A call to token-use's own `mark_task` starts a task here too, so the two mods stay in step.
 
+A second tool, `context_breakdown`, returns the context window broken down as `/context` shows it: each category, the tokens of each MCP server's tools (loaded and deferred apart), the memory files, agents, skills and slash commands. It is a deferred tool, so it adds only its name to each request until it is used.
+
 ## How the numbers are worked out
 
 - **Session cost** is Claude Code's own total, the one `/cost` shows.
@@ -100,7 +102,7 @@ What it keeps lives in session state and ends with the session. It makes **no** 
 | [`hooks/register.tsx`](hooks/register.tsx) | the event hooks and the pane |
 | [`hooks/core.ts`](hooks/core.ts) | prices, sums and formatting, as plain functions |
 | [`hooks/scan.py`](hooks/scan.py) | reads the session's transcripts for totals and active time |
-| [`hooks/pane.test.tsx`](hooks/pane.test.tsx) | 20 tests: drawing, opening and closing sections, folding the Vitals stats row (terminal and desktop), permission tallies, the context limit, cache-write pricing by cache length, the Cache health section and its Vitals lines (memory index, requests this turn), and every width from 24 to 120 columns on the terminal and the desktop |
+| [`hooks/pane.test.tsx`](hooks/pane.test.tsx) | 21 tests: drawing, opening and closing sections, folding the Vitals stats row (terminal and desktop), permission tallies, the context limit, cache-write pricing by cache length, the Cache health section and its Vitals lines (memory index, requests this turn), every width from 24 to 120 columns on the terminal and the desktop, and the `context_breakdown` text |
 | [`hooks/scan_test.py`](hooks/scan_test.py) | `python3 -I hooks/scan_test.py`: transcript reading — one-hour writes when a response has no split, the cap at the write, empty placeholder lines skipped, two responses in the same millisecond, rebuild labels |
 | [`types/index.d.ts`](types/index.d.ts) | the state contract |
 

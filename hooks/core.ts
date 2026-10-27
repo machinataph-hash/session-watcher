@@ -1,5 +1,5 @@
 // Pure helpers: numbers, prices, formatting. No engine calls here.
-import type { ModelUsage } from 'claude-code'
+import type { ModelUsage, SessionContextBreakdown } from 'claude-code'
 
 import type { Bucket, Gate, Row, Scan, Task, Usage } from '../types'
 
@@ -167,3 +167,28 @@ const csvCell = (v: string | number) => {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
 }
 export const csv = (rows: (string | number)[][]) => rows.map(r => r.map(csvCell).join(',')).join('\n')
+
+// The context_breakdown tool's answer: /context's categories, then per-server MCP tool tokens,
+// memory files, agents, skills and slash commands, largest first.
+export const breakdownText = (b: SessionContextBreakdown) => {
+  const n = (x: number) => Math.round(x).toLocaleString('en-US')
+  const servers = new Map<string, { loaded: number; deferred: number; tools: number }>()
+  for (const t of b.mcpTools) {
+    const s = servers.get(t.serverName) ?? { loaded: 0, deferred: 0, tools: 0 }
+    if (t.isLoaded) s.loaded += t.tokens
+    else s.deferred += t.tokens
+    s.tools += 1
+    servers.set(t.serverName, s)
+  }
+  const out = [`Context ${n(b.totalTokens)} of ${n(b.rawMaxTokens)} (${b.model})`, 'Categories (deferred ones do not count toward the total):']
+  for (const c of [...b.categories].sort((x, y) => y.tokens - x.tokens)) out.push(`  ${c.name}: ${n(c.tokens)}${c.isDeferred ? ' (deferred)' : ''}`)
+  out.push('MCP servers (loaded tokens, deferred tokens, tools):')
+  for (const [name, s] of [...servers].sort((x, y) => y[1].loaded + y[1].deferred - (x[1].loaded + x[1].deferred)))
+    out.push(`  ${name}: ${n(s.loaded)}, ${n(s.deferred)}, ${s.tools}`)
+  out.push('Memory files:')
+  for (const m of b.memoryFiles) out.push(`  ${m.path}: ${n(m.tokens)}`)
+  out.push(`Agents: ${n(b.agents.reduce((a, x) => a + x.tokens, 0))} over ${b.agents.length}`)
+  if (b.skills) out.push(`Skills: ${n(b.skills.tokens)}, ${b.skills.includedSkills} of ${b.skills.totalSkills} listed`)
+  if (b.slashCommands) out.push(`Slash commands: ${n(b.slashCommands.tokens)}, ${b.slashCommands.includedCommands} of ${b.slashCommands.totalCommands} listed`)
+  return out.join('\n')
+}

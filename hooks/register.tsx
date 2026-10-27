@@ -5,6 +5,7 @@ import type { Active, AgentCard, Bucket, CacheHealth, Call, Check, Gate, Limit, 
 import {
   BUCKETS,
   EDIT_TOOLS,
+  breakdownText,
   bucketOf,
   clock,
   csv,
@@ -38,6 +39,7 @@ const PANE = 'session-watcher'
 const TOOL = 'mark_task'
 // token-use's tool: a mark made through it starts a task here too.
 const OLD_TOOL = 'mcp__token-use__mark_task'
+const BREAKDOWN_TOOL = 'context_breakdown'
 
 const tasks = atom({ plugin: 'session-watcher', key: 'tasks' } as const, [] as Task[])
 const calls = atom({ plugin: 'session-watcher', key: 'calls' } as const, [] as Call[])
@@ -171,6 +173,12 @@ export const register: Register = on => {
       inputSchema: { type: 'object', properties: { label: { type: 'string', description: 'Short task name' } }, required: ['label'] },
       isDeferred: false,
     })
+    await $.tool.register({
+      name: BREAKDOWN_TOOL,
+      description: 'The context window broken down as /context shows it: categories, tokens per MCP server, memory files, agents, skills.',
+      inputSchema: { type: 'object', properties: {} },
+      isDeferred: true,
+    })
     const now = await $.clock.now()
     await update($, tasks, l => (l.length === 0 ? [newTask('Unlabelled', now)] : l))
     await readUsage($, true)
@@ -219,6 +227,11 @@ export const register: Register = on => {
     const f = factorOf(await read($, scan))
     const summary = ended ? `${ended.label}: ${line(taskTotal(ended))} · ${usd(taskTotal(ended).usd * f)}` : 'none'
     return { result: `Started: ${label}\nEnded: ${summary}` }
+  })
+
+  on('tool.call', { tool: /^mcp__session-watcher__context_breakdown$/ }, async $ => {
+    const b = (await $.session.usage({ breakdown: 'full' })).context.breakdown
+    return { result: b ? breakdownText(b) : 'No breakdown: no session is bound.' }
   })
 
   on('tool.call', { tool: OLD_TOOL }, async ($, e, next) => {
