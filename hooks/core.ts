@@ -3,7 +3,7 @@ import type { ModelUsage } from 'claude-code'
 
 import type { Bucket, Gate, Row, Scan, Task, Usage } from '../types'
 
-export const empty = (): Usage => ({ input: 0, cacheWrite: 0, cacheRead: 0, output: 0, calls: 0, usd: 0 })
+export const empty = (): Usage => ({ input: 0, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0, output: 0, calls: 0, usd: 0 })
 export const mainRow = (): Row => ({ id: 'main', who: 'main thread', type: 'main', models: [], usage: empty() })
 export const newTask = (label: string, now: number): Task => ({ label, startedAt: now, main: mainRow(), agents: [] })
 
@@ -19,15 +19,28 @@ const PRICES: Record<string, [number, number]> = {
 export const familyOf = (model: string) => /(fable|mythos|opus|sonnet|haiku)/i.exec(model)?.[1]?.toLowerCase() ?? 'other'
 export const priceOf = (model: string): [number, number] => PRICES[familyOf(model)] ?? [3, 15]
 
-export const usdOf = (model: string, u: { input: number; cacheWrite: number; cacheRead: number; output: number }) => {
-  const [i, o] = priceOf(model)
-  return (u.input * i + u.cacheWrite * i * 1.25 + u.cacheRead * i * 0.1 + u.output * o) / 1e6
+// A cache write costs by how long the cache keeps it: five minutes at 1.25x input, one hour at 2x.
+// Counted in input-token units; usage stored before the split was kept has no cacheWrite1h and prices at 1.25x.
+type Tokens = { input: number; cacheWrite: number; cacheWrite1h?: number; cacheRead: number; output: number }
+export const writeCost = (u: Tokens) => {
+  const long = Math.min(u.cacheWrite1h ?? 0, u.cacheWrite)
+  return (u.cacheWrite - long) * 1.25 + long * 2
 }
 
-export const fromModel = (model: string, m: ModelUsage): Usage => {
+export const usdOf = (model: string, u: Tokens) => {
+  const [i, o] = priceOf(model)
+  return (u.input * i + writeCost(u) * i + u.cacheRead * i * 0.1 + u.output * o) / 1e6
+}
+
+// The response's split by cache length when it carries one; else the main thread's writes go to the
+// one-hour cache and a sub-agent's to the five-minute one (Claude Code's defaults on a subscription).
+export const fromModel = (model: string, m: ModelUsage, isMain: boolean): Usage => {
+  const split = (m as { cache_creation?: { ephemeral_1h_input_tokens?: number } }).cache_creation
+  const cacheWrite = m.cache_creation_input_tokens ?? 0
   const u = {
     input: m.input_tokens ?? 0,
-    cacheWrite: m.cache_creation_input_tokens ?? 0,
+    cacheWrite,
+    cacheWrite1h: split ? (split.ephemeral_1h_input_tokens ?? 0) : isMain ? cacheWrite : 0,
     cacheRead: m.cache_read_input_tokens ?? 0,
     output: m.output_tokens ?? 0,
   }
@@ -37,6 +50,7 @@ export const fromModel = (model: string, m: ModelUsage): Usage => {
 export const sum = (a: Usage, b: Usage): Usage => ({
   input: a.input + b.input,
   cacheWrite: a.cacheWrite + b.cacheWrite,
+  cacheWrite1h: (a.cacheWrite1h ?? 0) + (b.cacheWrite1h ?? 0),
   cacheRead: a.cacheRead + b.cacheRead,
   output: a.output + b.output,
   calls: a.calls + b.calls,
@@ -46,7 +60,7 @@ export const sum = (a: Usage, b: Usage): Usage => ({
 // "Fresh" is what was paid full price: uncached input, cache writes and output.
 export const fresh = (u: Usage) => u.input + u.cacheWrite + u.output
 // Weighted: each kind by its price ratio to uncached input, so it compares cost, not volume.
-export const weighted = (u: Usage) => u.input + u.cacheWrite * 1.25 + u.cacheRead * 0.1 + u.output * 5
+export const weighted = (u: Usage) => u.input + writeCost(u) + u.cacheRead * 0.1 + u.output * 5
 
 export const rowUse = (r: Row, model: string, u: Usage): Row => ({
   ...r,

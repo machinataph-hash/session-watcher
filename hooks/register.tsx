@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Active, AgentCard, Bucket, Call, Check, Gate, Limit, LogLine, Receipt, Row, Scan, Task, Turn, Usage, Vitals } from '../types'
+import type { Active, AgentCard, Bucket, CacheHealth, Call, Check, Gate, Limit, LogLine, Receipt, Row, Scan, Task, Turn, Usage, Vitals } from '../types'
 import {
   BUCKETS,
   EDIT_TOOLS,
@@ -30,6 +30,7 @@ import {
   usd,
   weighted,
   when,
+  writeCost,
 } from './core'
 
 const NAME = 'session-watcher'
@@ -64,6 +65,9 @@ const receipt = atom({ plugin: 'session-watcher', key: 'receipt' } as const, nul
 const log = atom({ plugin: 'session-watcher', key: 'log' } as const, [] as LogLine[])
 // The sections that are open. Vitals always shows; the rest start as listed here.
 const DEFAULT_OPEN = ['session', 'tasks']
+// Cache health limits: past either, a line in the Vitals card says so.
+const MEMORY_MAX = 4200
+const TURN_MAX = 15
 const sections = atom({ plugin: 'session-watcher', key: 'sections' } as const, DEFAULT_OPEN)
 // Tasks whose open state differs from their default (the current task starts open, earlier ones closed).
 const taskToggles = atom({ plugin: 'session-watcher', key: 'taskToggles' } as const, [] as number[])
@@ -106,7 +110,7 @@ const readTranscript = async ($: EngineInterface) => {
   if (!id) return
   const r = await $.process.run(['python3', '-I', `${$.plugin.root}/hooks/scan.py`, id], { timeoutMs: 120000 }).catch(() => null)
   if (!r || r.exitCode !== 0) return
-  let got: { ms?: number; byModel?: Scan['byModel']; missing?: boolean }
+  let got: { ms?: number; byModel?: Scan['byModel']; cache?: CacheHealth; missing?: boolean }
   try {
     got = JSON.parse(r.stdout)
   } catch {
@@ -115,7 +119,7 @@ const readTranscript = async ($: EngineInterface) => {
   if (got.missing || !got.byModel) return
   const byModel = got.byModel
   const cost = await $.session.usage().then(u => u.cost?.usd ?? null).catch(() => null)
-  await update($, scan, () => priceScan({ at, byModel, costUsd: cost }))
+  await update($, scan, () => priceScan({ at, byModel, costUsd: cost, cache: got.cache }))
   await update($, active, a => ({ ...a, hist: got.ms ?? 0, ms: 0, since: a.turns.length > 0 ? at : null }))
 }
 
@@ -261,7 +265,7 @@ export const register: Register = on => {
     const usage = result?.usage
     if (!usage) return result
     if (ttft !== null) await update($, vitals, v => ({ ...v, ttftMs: ttft }))
-    const u = fromModel(usage.model, usage)
+    const u = fromModel(usage.model, usage, !agentId)
     const now = await $.clock.now()
     let who = 'main thread'
     let type = 'main'
@@ -446,7 +450,7 @@ export const register: Register = on => {
     const { Box, Text, Button } = ui
     // The terminal draws bars as characters; the other surfaces have a proportional font, so an SVG.
     const Svg = e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : undefined
-    const [list0, log0, note, open, toggles, act, sc, v0, cards, g0, rc, lines] = await Promise.all([
+    const [list0, log0, note, open, toggles, act, sc, v0, cards, g0, rc, lines, tn] = await Promise.all([
       read($, tasks),
       read($, calls),
       read($, copied),
@@ -459,6 +463,7 @@ export const register: Register = on => {
       read($, gate),
       read($, receipt),
       read($, log),
+      read($, turn),
     ])
     const now = await $.clock.now()
     // A session whose start was missed still has a current task to show.
@@ -499,10 +504,10 @@ export const register: Register = on => {
       text: '#6b6b6b', merged: '#8e5bd6', bashBorder: '#e0569f', planMode: '#23968a', inactive: '#a8a8a8', permission: '#7c83f2',
     }
     const KINDS = [
-      { field: 'input', name: 'input', weight: 1, color: 'success' },
-      { field: 'cacheWrite', name: 'cache write', weight: 1.25, color: 'warning' },
-      { field: 'cacheRead', name: 'cache read', weight: 0.1, color: 'error' },
-      { field: 'output', name: 'output', weight: 5, color: 'claude' },
+      { field: 'input', name: 'input', cost: (u: Usage) => u.input, color: 'success' },
+      { field: 'cacheWrite', name: 'cache write', cost: writeCost, color: 'warning' },
+      { field: 'cacheRead', name: 'cache read', cost: (u: Usage) => u.cacheRead * 0.1, color: 'error' },
+      { field: 'output', name: 'output', cost: (u: Usage) => u.output * 5, color: 'claude' },
     ] as const
     const FAMILY: Record<string, BarColor> = { fable: 'merged', mythos: 'merged', opus: 'bashBorder', sonnet: 'planMode', haiku: 'inactive', other: 'permission' }
     const whoColor = (r: Row): BarColor => (r.type === 'main' ? 'text' : (FAMILY[familyOf(r.models[0] ?? '')] ?? 'permission'))
@@ -644,6 +649,13 @@ export const register: Register = on => {
     const ctxColor: BarColor = ctxPct === null ? 'inactive' : ctxPct >= 85 ? 'error' : ctxPct >= 65 ? 'warning' : 'success'
     const runFor = now - sessionStart
     const actMs = activeMs(act, now)
+    // ---- cache health: read from the transcripts; requests this turn from the live log
+    const ch = sc.cache
+    const turnReqs = tn && tn.startedAt > 0 ? log0.filter(c => c.who === 'main thread' && c.at >= tn.startedAt).length : 0
+    const cacheWarnings = [
+      ...(ch && ch.memoryChars !== null && ch.memoryChars > MEMORY_MAX ? [`memory index ${k(ch.memoryChars)} chars (over ${MEMORY_MAX.toLocaleString('en-US')})`] : []),
+      ...(turnReqs > TURN_MAX ? [`${turnReqs} requests this turn (over ${TURN_MAX})`] : []),
+    ]
     const vitalsCard = (
       <Box key="vitals" flexDirection="column" borderStyle="round" borderColor="claude" paddingX={1} gap={1}>
         <Box key="title" flexDirection="row" flexWrap="wrap" columnGap={2} justifyContent="space-between">
@@ -694,6 +706,11 @@ export const register: Register = on => {
             })}
           </Box>
         )}
+        {cacheWarnings.length > 0 && (
+          <Text key="cache-warn" color="warning" wrap="wrap">
+            {`⚠ Cache: ${cacheWarnings.join(' · ')}. See Cache health.`}
+          </Text>
+        )}
       </Box>
     )
 
@@ -723,7 +740,7 @@ export const register: Register = on => {
           </Box>
           {KINDS.map(kd => {
             const share = tokens > 0 ? u[kd.field] / tokens : 0
-            const costShare = cost > 0 ? (kd.weight * u[kd.field]) / cost : 0
+            const costShare = cost > 0 ? kd.cost(u) / cost : 0
             return (
               <Box key={kd.field} flexDirection="row" gap={1} alignItems="center">
                 <Box width={KIND_W} flexShrink={0}>
@@ -993,6 +1010,60 @@ export const register: Register = on => {
             ]),
           ]
 
+    const WHY: Record<string, string> = { start: 'session start', idle: 'idle over 1 hour', summary: 'after a summary', other: 'other' }
+    const toolName = (name: string) => {
+      const parts = name.split('__')
+      return parts[0] === 'mcp' && parts.length >= 3 ? parts.slice(2).join('__') : name
+    }
+    const cacheBody = () =>
+      !ch
+        ? [<Text key="none" dimColor>{sc.at > 0 ? 'No cache data in the transcripts.' : 'Reading the transcripts…'}</Text>]
+        : [
+            stats('c', [
+              stat('f', 'STARTING LOAD', k(ch.first), { sub: 'first request' }),
+              stat('t', 'REQUESTS THIS TURN', String(turnReqs), { color: turnReqs > TURN_MAX ? 'error' : undefined, sub: `limit ${TURN_MAX}` }),
+              stat('m', 'MEMORY INDEX', ch.memoryChars === null ? '—' : `${k(ch.memoryChars)} chars`, {
+                color: ch.memoryChars !== null && ch.memoryChars > MEMORY_MAX ? 'error' : undefined,
+                sub: `limit ${MEMORY_MAX.toLocaleString('en-US')}`,
+              }),
+              stat('r', 'REBUILDS', String(ch.rebuildCount), { sub: `${k(ch.rebuildTokens)} written` }),
+            ]),
+            <Box key="rb" flexDirection="column">
+              {heading('h', 'REBUILDS · REQUESTS WRITING OVER 50K')}
+              {ch.rebuilds.length === 0 ? (
+                <Text key="none" dimColor>None.</Text>
+              ) : (
+                ch.rebuilds
+                  .slice(-5)
+                  .reverse()
+                  .map((r, i) => (
+                    <Box key={`r${i}`} flexDirection="row" gap={1}>
+                      {cell('t', 5, <Text dimColor tabular>{hhmm(r.at)}</Text>, false)}
+                      <Box flexGrow={1} flexShrink={1} minWidth={0}>
+                        <Text wrap="truncate-end">{WHY[r.why] ?? r.why}</Text>
+                      </Box>
+                      {cell('n', 7, n(k(r.tokens)))}
+                    </Box>
+                  ))
+              )}
+            </Box>,
+            <Box key="tl" flexDirection="column">
+              {heading('h', 'LARGEST TOOL RESULTS · CHARACTERS')}
+              {ch.tools.length === 0 ? (
+                <Text key="none" dimColor>None yet.</Text>
+              ) : (
+                ch.tools.map((t, i) => (
+                  <Box key={`t${i}`} flexDirection="row" gap={1}>
+                    <Box flexGrow={1} flexShrink={1} minWidth={0}>
+                      <Text wrap="truncate-end">{toolName(t.name)}</Text>
+                    </Box>
+                    {cell('n', 7, n(k(t.chars)))}
+                  </Box>
+                ))
+              )}
+            </Box>,
+          ]
+
     // ---- activity
     const logBody = () =>
       lines.length === 0
@@ -1026,6 +1097,7 @@ export const register: Register = on => {
         {section('requests', 'Recent requests', `${log0.length} seen`, requestsBody)}
         {section('agents', 'Sub-agents', cards.length === 0 ? 'none' : `${running} running · ${cards.length} total`, agentsBody)}
         {section('gate', 'Permissions', `${gt.allowed} ok · ${gt.asked} asked · ${gt.denied} denied`, gateBody)}
+        {section('cache', 'Cache health', ch ? `start ${k(ch.first)} · ${ch.rebuildCount} rebuild${ch.rebuildCount === 1 ? '' : 's'}` : '—', cacheBody)}
         {section('turn', 'Last turn', rc ? `${dur(rc.durationMs)}${rc.costDelta !== null ? ` · +${usd(rc.costDelta)}` : ''}` : '—', turnBody)}
         {section('log', 'Activity', errorsNow > 0 ? `${lines.length} events · ${errorsNow} errors` : `${lines.length} events`, logBody)}
         <Box key="actions" flexDirection="row" flexWrap="wrap" gap={1} alignItems="center">
@@ -1041,7 +1113,7 @@ export const register: Register = on => {
           {isCalibrated
             ? 'Cost is Claude Code’s own total. Each row’s cost is its tokens at list price, scaled so the rows add up to that total.'
             : 'Cost is an estimate at list price until Claude Code reports the session cost.'}{' '}
-          Weighted = input ×1 + cache write ×1.25 + cache read ×0.1 + output ×5. Fresh = input + cache write + output.
+          Weighted = input ×1 + cache write ×1.25 (five-minute cache) or ×2 (one-hour cache) + cache read ×0.1 + output ×5. Fresh = input + cache write + output.
         </Text>
       </Box>
     )

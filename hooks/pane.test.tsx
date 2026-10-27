@@ -1,4 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
+import { fromModel, weighted } from './core'
 
 const pane = { title: '', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} } as const
 const usage = { model: 'claude-opus-5-5', input_tokens: 1000, output_tokens: 2000, cache_read_input_tokens: 100000, cache_creation_input_tokens: 4000 }
@@ -58,7 +59,7 @@ for (const surface of ['terminal', 'desktop'] as const)
       mock.clock(on)
       await start($, on)
       const ui = await mount($, surface, bodyColumns)
-      for (const id of ['session', 'requests', 'agents', 'gate', 'turn', 'log']) {
+      for (const id of ['session', 'requests', 'agents', 'gate', 'cache', 'turn', 'log']) {
         if (id !== 'session') await ui.press({ key: `sec-${id}` })
       }
       expect(await ui.find({ type: 'Text', text: /No calls yet/ })).toBeDefined()
@@ -84,4 +85,59 @@ test('the context bar uses the compaction window from settings', async ($, on) =
   const ui = await mount($, 'terminal')
   expect(await ui.find({ type: 'Text', text: /150k \/ 300k/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /50%/ })).toBeDefined()
+})
+
+// A cache write costs by cache length: one hour at 2x input, five minutes at 1.25x.
+test('cache writes are priced by cache length', async () => {
+  const m = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 1000 }
+  // no split on the response: the main thread's writes are one-hour, a sub-agent's five-minute
+  expect(weighted(fromModel('claude-opus-5-5', m, true))).toBe(2000)
+  expect(weighted(fromModel('claude-opus-5-5', m, false))).toBe(1250)
+  // a split on the response wins: 400 one-hour + 600 five-minute
+  const split = { ...m, cache_creation: { ephemeral_1h_input_tokens: 400, ephemeral_5m_input_tokens: 600 } }
+  expect(weighted(fromModel('claude-opus-5-5', split as never, false))).toBe(1550)
+  // usage stored before the split was kept prices every write at 1.25x
+  expect(weighted({ input: 0, cacheWrite: 1000, cacheRead: 0, output: 0, calls: 1, usd: 0 })).toBe(1250)
+})
+
+// Cache health shows the transcript's figures, and a limit passed shows in the always-shown Vitals card.
+test('cache health section and its Vitals line', async ($, on) => {
+  mock.clock(on)
+  const cache = {
+    first: 91525,
+    rebuilds: [
+      { at: 1000, tokens: 91523, why: 'start' },
+      { at: 2000, tokens: 193388, why: 'idle' },
+    ],
+    rebuildCount: 2,
+    rebuildTokens: 284911,
+    memoryChars: 18057,
+    tools: [{ name: 'mcp__blueprint__resolve_references', chars: 31463, at: 1500 }],
+  }
+  on('session.id', async () => ({ value: 'sid' }) as never)
+  on('process.run', async () => ({ value: { exitCode: 0, stdout: JSON.stringify({ ms: 0, byModel: {}, cache }), stderr: '' } }) as never)
+  await start($, on)
+  for (let i = 0; i < 200; i++) await Promise.resolve()
+  const ui = await mount($, 'terminal')
+  expect(await ui.find({ type: 'Text', text: /memory index 18k chars \(over 4,200\)/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^STARTING LOAD$/ })).toBeUndefined()
+  await ui.press({ key: 'sec-cache' })
+  expect(await ui.find({ type: 'Text', text: /^STARTING LOAD$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^92k$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^idle over 1 hour$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^resolve_references$/ })).toBeDefined()
+})
+
+// Below both limits, no Vitals line.
+test('no cache line when every figure is inside its limit', async ($, on) => {
+  mock.clock(on)
+  const cache = { first: 50000, rebuilds: [], rebuildCount: 0, rebuildTokens: 0, memoryChars: 3000, tools: [] }
+  on('session.id', async () => ({ value: 'sid' }) as never)
+  on('process.run', async () => ({ value: { exitCode: 0, stdout: JSON.stringify({ ms: 0, byModel: {}, cache }), stderr: '' } }) as never)
+  await start($, on)
+  for (let i = 0; i < 200; i++) await Promise.resolve()
+  const ui = await mount($, 'terminal')
+  expect(await ui.find({ type: 'Text', text: /Cache:/ })).toBeUndefined()
+  await ui.press({ key: 'sec-cache' })
+  expect(await ui.find({ type: 'Text', text: /^50k$/ })).toBeDefined()
 })

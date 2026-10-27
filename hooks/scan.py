@@ -9,7 +9,12 @@ Active time: a turn runs from the first message after an end of turn to the
 main loop's next end_turn; the time between turns is idle. Sub-agent lines are
 left out of it, since they run inside a main turn.
 
-Prints {"ms", "byModel": {model: {"main": usage, "agents": usage}}}.
+Cache health: the first request's context (the starting load); every
+main-thread request writing over 50k tokens to the cache (a rebuild), labelled
+start, idle (over 60 minutes since the previous response), summary (a summary
+came in between) or other; the memory index size; the 10 largest tool results.
+
+Prints {"ms", "byModel": {model: {"main": usage, "agents": usage}}, "cache"}.
 """
 import glob, json, os, sys
 from datetime import datetime
@@ -25,20 +30,46 @@ agent_paths = glob.glob(os.path.join(main_path[:-len('.jsonl')], 'subagents', '*
 
 FIELDS = (('input', 'input_tokens'), ('cacheWrite', 'cache_creation_input_tokens'),
           ('cacheRead', 'cache_read_input_tokens'), ('output', 'output_tokens'))
-responses = {}  # message id -> (who, model, {field: max})
+responses = {}  # message id -> (who, model, {field: max}, first timestamp)
+summaries = []  # timestamps of summaries in the main transcript
+tool_names = {}  # tool_use id -> tool name
+results = []  # (chars, tool_use id, timestamp)
+REBUILD = 50000
+IDLE_MS = 60 * 60 * 1000
+
+
+def stamp(o):
+    ts = o.get('timestamp')
+    if not ts:
+        return None
+    return int(datetime.fromisoformat(ts.replace('Z', '+00:00')).timestamp() * 1000)
+
+
+def text_len(c):
+    if isinstance(c, str):
+        return len(c)
+    return sum(len(b.get('text') or '') for b in c or [] if isinstance(b, dict))
 
 
 def read(path, is_agent, events):
     with open(path, encoding='utf-8', errors='replace') as f:
         for line in f:
-            if '"type":"assistant"' not in line and '"type":"user"' not in line:
+            if '"type":"assistant"' not in line and '"type":"user"' not in line and 'compact_boundary' not in line:
                 continue
             try:
                 o = json.loads(line)
             except ValueError:
                 continue
             msg = o.get('message') or {}
+            if not is_agent and (o.get('isCompactSummary') or o.get('subtype') == 'compact_boundary'):
+                at = stamp(o)
+                if at is not None:
+                    summaries.append(at)
+            c = msg.get('content')
             if o.get('type') == 'assistant':
+                for b in c if isinstance(c, list) else []:
+                    if isinstance(b, dict) and b.get('type') == 'tool_use' and b.get('id'):
+                        tool_names[b['id']] = b.get('name') or '?'
                 u = msg.get('usage')
                 model = msg.get('model') or ''
                 if u and model and model != '<synthetic>':
@@ -46,19 +77,22 @@ def read(path, is_agent, events):
                     who = 'agents' if is_agent or o.get('isSidechain') else 'main'
                     prev = responses.get(key)
                     vals = {f: int(u.get(src) or 0) for f, src in FIELDS}
+                    vals['cacheWrite1h'] = int((u.get('cache_creation') or {}).get('ephemeral_1h_input_tokens') or 0)
                     if prev:
                         vals = {f: max(vals[f], prev[2][f]) for f in vals}
-                    responses[key] = (who, model, vals)
+                    responses[key] = (who, model, vals, prev[3] if prev else stamp(o))
+            elif o.get('type') == 'user' and isinstance(c, list):
+                for b in c:
+                    if isinstance(b, dict) and b.get('type') == 'tool_result':
+                        results.append((text_len(b.get('content')), b.get('tool_use_id'), stamp(o)))
             if events is None or o.get('isSidechain') or o.get('isMeta'):
                 continue
             if o.get('type') not in ('assistant', 'user'):
                 continue
-            ts = o.get('timestamp')
-            if not ts:
+            at = stamp(o)
+            if at is None:
                 continue
-            at = int(datetime.fromisoformat(ts.replace('Z', '+00:00')).timestamp() * 1000)
             end = o['type'] == 'assistant' and msg.get('stop_reason') == 'end_turn'
-            c = msg.get('content')
             prompt = o['type'] == 'user' and not o.get('isCompactSummary') and (
                 isinstance(c, str) or any(isinstance(b, dict) and b.get('type') == 'text' for b in c or []))
             events.append((at, end, prompt))
@@ -78,13 +112,46 @@ for at, end, prompt in events:
     prev = at
 
 by_model = {}
-for who, model, vals in responses.values():
+for who, model, vals, _ in responses.values():
     m = by_model.setdefault(model, {
-        'main': {'input': 0, 'cacheWrite': 0, 'cacheRead': 0, 'output': 0, 'calls': 0, 'usd': 0},
-        'agents': {'input': 0, 'cacheWrite': 0, 'cacheRead': 0, 'output': 0, 'calls': 0, 'usd': 0},
+        'main': {'input': 0, 'cacheWrite': 0, 'cacheWrite1h': 0, 'cacheRead': 0, 'output': 0, 'calls': 0, 'usd': 0},
+        'agents': {'input': 0, 'cacheWrite': 0, 'cacheWrite1h': 0, 'cacheRead': 0, 'output': 0, 'calls': 0, 'usd': 0},
     })
     row = m[who]
     for f in vals:
         row[f] += vals[f]
     row['calls'] += 1
-print(json.dumps({'ms': ms, 'byModel': by_model}))
+main = sorted((at, vals) for who, _, vals, at in responses.values() if who == 'main' and at is not None)
+summaries.sort()
+first = (main[0][1]['input'] + main[0][1]['cacheWrite'] + main[0][1]['cacheRead']) if main else 0
+rebuilds, count, written, prev_at, si = [], 0, 0, None, 0
+for at, vals in main:
+    seen = 0
+    while si < len(summaries) and summaries[si] <= at:
+        if prev_at is None or summaries[si] > prev_at:
+            seen += 1
+        si += 1
+    if vals['cacheWrite'] > REBUILD:
+        why = 'start' if prev_at is None else 'summary' if seen else 'idle' if at - prev_at > IDLE_MS else 'other'
+        rebuilds.append({'at': at, 'tokens': vals['cacheWrite'], 'why': why})
+        count += 1
+        written += vals['cacheWrite']
+    prev_at = at
+
+memory = os.path.join(os.path.dirname(main_path), 'memory', 'MEMORY.md')
+try:
+    with open(memory, encoding='utf-8', errors='replace') as f:
+        memory_chars = len(f.read())
+except OSError:
+    memory_chars = None
+
+top = sorted(results, key=lambda r: -r[0])[:10]
+cache = {
+    'first': first,
+    'rebuilds': rebuilds[-20:],
+    'rebuildCount': count,
+    'rebuildTokens': written,
+    'memoryChars': memory_chars,
+    'tools': [{'name': tool_names.get(i, '?'), 'chars': n, 'at': at or 0} for n, i, at in top],
+}
+print(json.dumps({'ms': ms, 'byModel': by_model, 'cache': cache}))

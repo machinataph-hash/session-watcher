@@ -1,5 +1,6 @@
 // `usd` is the list-price estimate of the tokens; the pane scales it to the engine's real cost.
-export type Usage = { input: number; cacheWrite: number; cacheRead: number; output: number; calls: number; usd: number }
+// `cacheWrite` is every cache write; `cacheWrite1h` the part written to the one-hour cache (absent in usage stored before 0.2.0).
+export type Usage = { input: number; cacheWrite: number; cacheWrite1h?: number; cacheRead: number; output: number; calls: number; usd: number }
 export type Row = { id: string; who: string; type: string; models: string[]; usage: Usage }
 export type Task = { label: string; startedAt: number; endedAt?: number; main: Row; agents: Row[] }
 // Active time: `hist` is what the transcript held when last read; `ms` and `since` add the turns since.
@@ -18,7 +19,22 @@ export type Call = {
 }
 
 /** The whole session as its transcripts hold it (main + every sub-agent), one entry per model. */
-export type Scan = { at: number; byModel: Record<string, { main: Usage; agents: Usage }>; costUsd?: number | null }
+export type Scan = { at: number; byModel: Record<string, { main: Usage; agents: Usage }>; costUsd?: number | null; cache?: CacheHealth }
+
+/** Where the cache cost comes from, read from the transcripts. A rebuild is a main-thread request writing over 50k tokens. */
+export type Rebuild = { at: number; tokens: number; why: 'start' | 'idle' | 'summary' | 'other' }
+export type CacheHealth = {
+  /** the context of the session's first request */
+  first: number
+  /** the latest 20 rebuilds, oldest first */
+  rebuilds: Rebuild[]
+  rebuildCount: number
+  rebuildTokens: number
+  /** characters in the project's memory index (memory/MEMORY.md); null when there is none */
+  memoryChars: number | null
+  /** the 10 largest tool results so far, largest first */
+  tools: { name: string; chars: number; at: number }[]
+}
 
 export type Limit = { kind: string; pct: number; resetsAt: number | null }
 export type Vitals = {

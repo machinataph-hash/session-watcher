@@ -1,6 +1,6 @@
 {
   "name": "session-watcher",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "One pane for the whole session: context and rate limits, Claude Code's real cost, token use per session, per task and per request, sub-agents, permission checks and an activity log. Watch-only; nothing leaves your machine.",
   "author": { "name": "machinataph-hash", "url": "https://github.com/machinataph-hash" },
   "homepage": "https://github.com/machinataph-hash/session-watcher",

@@ -42,6 +42,7 @@ Click a section's title to open or close it. The top card is always shown. Sessi
 | **Recent requests** | the last 15 model requests: time, who, model, input and cache-write tokens, cache reads, output, cost | `turn.step` |
 | **Sub-agents** | each sub-agent: running, done or failed; its task; type; model; steps; context size; output; run time; its last tool call | `agent.spawn`, `turn.step`, `tool.call`, `turn.complete` |
 | **Permissions** | checks allowed, asked and denied, by kind of tool (file, shell, web, agent, other), a bar of the mix, and the latest 6 checks with secrets masked | `tool.check` |
+| **Cache health** (closed at first) | the starting load (the context of the session's first request), requests in the current turn (highlighted past 15), the memory index size (highlighted past 4,200 characters), cache rebuilds (main-thread requests writing over 50k, each labelled session start, after a summary, idle over 1 hour, or other) and the 10 largest tool results so far. When a figure is past its limit, one line in the Vitals card says which | the transcripts |
 | **Last turn** | how long it took, the cost it added, tool calls, edits, errors, sub-agents started | `turn.start`, `tool.call`, `turn.complete` |
 | **Activity** | your prompts (first 70 characters), sub-agents starting and finishing, edits, failed tool calls, denials, compactions | all of the above |
 
@@ -58,7 +59,7 @@ The mod adds a tool, `mark_task`. When Claude calls it with a label (for example
 - **Session cost** is Claude Code's own total, the one `/cost` shows.
 - **The cost of a row, task or request** is its tokens priced at list price, then scaled so the rows add up to Claude Code's total. The list prices are only used as ratios between models. Fable is priced like Opus until its price is known.
 - **Session totals** come from the transcripts, the main one and each sub-agent's. A response is written there as several lines that repeat its usage, so each response is counted once, by its message id. This also counts requests made before the mod was loaded.
-- **Weighted** = input ×1 + cache write ×1.25 + cache read ×0.1 + output ×5. These are the price ratios, so weighted tokens compare cost, not volume. **Fresh** = input + cache write + output: the tokens paid at full price.
+- **Weighted** = input ×1 + cache write ×2 (one-hour cache) or ×1.25 (five-minute cache) + cache read ×0.1 + output ×5. Each response says how many of its writes went to each cache; where a `turn.step` record does not, main-thread writes count as one-hour and sub-agent writes as five-minute, which is how Claude Code sets them on a subscription. These are the price ratios, so weighted tokens compare cost, not volume. **Fresh** = input + cache write + output: the tokens paid at full price.
 - **Active time** is time with a turn running, read from the transcript: from a prompt to the main thread's end of turn. Sub-agents run inside a turn, so they add no time of their own.
 - **Time to first token** is timed at the mod's own hook, so it includes the network and anything else that runs before the response's first piece. When thinking isn't streamed, it includes the thinking.
 
@@ -99,7 +100,7 @@ What it keeps lives in session state and ends with the session. It makes **no** 
 | [`hooks/register.tsx`](hooks/register.tsx) | the event hooks and the pane |
 | [`hooks/core.ts`](hooks/core.ts) | prices, sums and formatting, as plain functions |
 | [`hooks/scan.py`](hooks/scan.py) | reads the session's transcripts for totals and active time |
-| [`hooks/pane.test.tsx`](hooks/pane.test.tsx) | 14 tests: drawing, opening and closing sections, permission tallies, the context limit, and every width from 24 to 120 columns on the terminal and the desktop |
+| [`hooks/pane.test.tsx`](hooks/pane.test.tsx) | 17 tests: drawing, opening and closing sections, permission tallies, the context limit, cache-write pricing by cache length, the Cache health section and its Vitals line, and every width from 24 to 120 columns on the terminal and the desktop |
 | [`types/index.d.ts`](types/index.d.ts) | the state contract |
 
 ## Develop
