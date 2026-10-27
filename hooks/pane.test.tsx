@@ -146,3 +146,35 @@ test('no cache line when every figure is inside its limit', async ($, on) => {
   await ui.press({ key: 'sec-cache' })
   expect(await ui.find({ type: 'Text', text: /^50k$/ })).toBeDefined()
 })
+
+// Pressing the Vitals title folds away its stats row and keeps the context bar; pressing again brings it back.
+test('the Vitals stats row folds away', async ($, on) => {
+  mock.clock(on)
+  await start($, on)
+  const ui = await mount($, 'terminal')
+  expect(await ui.find({ type: 'Text', text: /^RUNNING FOR$/ })).toBeDefined()
+  await ui.press({ key: 'sec-vitals' })
+  expect(await ui.find({ type: 'Text', text: /^RUNNING FOR$/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /^CONTEXT/ })).toBeDefined()
+  await ui.press({ key: 'sec-vitals' })
+  expect(await ui.find({ type: 'Text', text: /^RUNNING FOR$/ })).toBeDefined()
+})
+
+// More than 15 main-thread requests in one turn shows the Vitals line; sub-agent requests do not count.
+test('requests this turn past 15 show in Vitals', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  on('turn.step', async function* () {
+    return { turnId: 't', index: 0, answer: '', toolUses: [], stopReason: 'tool_use', usage } as never
+  })
+  await start($, on)
+  await ($.turn.start as (e: unknown) => Promise<unknown>)({ turnId: 't', text: 'go' }).catch(() => undefined)
+  const step = async (agentId?: string) => {
+    for await (const _ of ($.turn.step as (e: unknown) => AsyncIterable<unknown>)({ turnId: 't', index: 0, model: usage.model, messageCount: 1, agentId })) void _
+  }
+  for (let i = 0; i < 15; i++) await step()
+  for (let i = 0; i < 5; i++) await step('a1')
+  const ui = await mount($, 'terminal')
+  expect(await ui.find({ type: 'Text', text: /requests this turn/ })).toBeUndefined()
+  await step()
+  expect(await ui.find({ type: 'Text', text: /16 requests this turn \(over 15\)/ })).toBeDefined()
+})

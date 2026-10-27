@@ -65,6 +65,8 @@ const receipt = atom({ plugin: 'session-watcher', key: 'receipt' } as const, nul
 const log = atom({ plugin: 'session-watcher', key: 'log' } as const, [] as LogLine[])
 // The sections that are open. Vitals always shows; the rest start as listed here.
 const DEFAULT_OPEN = ['session', 'tasks']
+// kept in the same list as the open sections: present means the Vitals stats row is folded away
+const VITALS_FOLDED = 'vitals-folded'
 // Cache health limits: past either, a line in the Vitals card says so.
 const MEMORY_MAX = 4200
 const TURN_MAX = 15
@@ -656,15 +658,20 @@ export const register: Register = on => {
       ...(ch && ch.memoryChars !== null && ch.memoryChars > MEMORY_MAX ? [`memory index ${k(ch.memoryChars)} chars (over ${MEMORY_MAX.toLocaleString('en-US')})`] : []),
       ...(turnReqs > TURN_MAX ? [`${turnReqs} requests this turn (over ${TURN_MAX})`] : []),
     ]
+    // The title folds away the stats row (cost, running for, active, requests); Session totals has the same figures.
+    const vitalsOpen = !isOpen(VITALS_FOLDED)
     const vitalsCard = (
       <Box key="vitals" flexDirection="column" borderStyle="round" borderColor="claude" paddingX={1} gap={1}>
         <Box key="title" flexDirection="row" flexWrap="wrap" columnGap={2} justifyContent="space-between">
-          <Text bold wrap="truncate-end">
-            <Text color={v.isRunning ? 'claude' : 'success'}>{v.isRunning ? '● ' : '○ '}</Text>
-            {v.model ? modelName(v.model) : 'Session'}
-            {v.effort ? <Text dimColor>{` · ${v.effort}`}</Text> : ''}
-            {v.mode ? <Text dimColor>{` · ${v.mode}`}</Text> : ''}
-          </Text>
+          <Button key="sec-vitals" plain onPress={() => void flip(VITALS_FOLDED)}>
+            <Text bold wrap="truncate-end">
+              <Text dimColor>{vitalsOpen ? '▾ ' : '▸ '}</Text>
+              <Text color={v.isRunning ? 'claude' : 'success'}>{v.isRunning ? '● ' : '○ '}</Text>
+              {v.model ? modelName(v.model) : 'Session'}
+              {v.effort ? <Text dimColor>{` · ${v.effort}`}</Text> : ''}
+              {v.mode ? <Text dimColor>{` · ${v.mode}`}</Text> : ''}
+            </Text>
+          </Button>
           <Text dimColor tabular>
             {v.isRunning ? 'working' : 'idle'}
             {v.ttftMs !== null ? ` · first token ${dur(v.ttftMs)}` : ''}
@@ -680,7 +687,7 @@ export const register: Register = on => {
           </Box>
           {strip('bar', [{ value: (ctxPct ?? 0) / 100, color: ctxColor }], { track: true, cells: inner })}
         </Box>
-        {stats('s1', [
+        {vitalsOpen && stats('s1', [
           stat('cost', v.costUsd !== null ? 'COST' : 'COST (EST.)', usd(v.costUsd ?? total.usd), { color: 'claude' }),
           stat('run', 'RUNNING FOR', clock(runFor), { sub: `since ${when(sessionStart)}` }),
           stat('act', 'ACTIVE', clock(actMs), { sub: `${runFor > 0 ? Math.round((100 * actMs) / runFor) : 0}% of the time` }),
@@ -822,8 +829,8 @@ export const register: Register = on => {
         <Box key="table" flexDirection="column">
           <Box key="head" flexDirection="row" gap={1}>
             <Box width={1} flexShrink={0} />
-            <Box flexGrow={1} flexShrink={1} minWidth={0}>{heading('who', 'WHO')}</Box>
-            {isWide && cell('m', 10, heading('m', 'MODEL'), false)}
+            <Box flexGrow={1} flexShrink={1} minWidth={0} paddingRight={1}>{heading('who', 'WHO')}</Box>
+            {isWide && cell('m', 12, heading('m', 'MODEL'), false)}
             {isWide && cell('c', 6, heading('c', 'CALLS'))}
             {cell('w', 7, heading('w', 'WEIGHT'))}
             {cell('u', 8, heading('u', 'COST'))}
@@ -833,10 +840,10 @@ export const register: Register = on => {
               <Box width={1} flexShrink={0}>
                 {swatch(whoColor(r))}
               </Box>
-              <Box flexGrow={1} flexShrink={1} minWidth={0}>
+              <Box flexGrow={1} flexShrink={1} minWidth={0} paddingRight={1}>
                 <Text wrap="truncate-end">{r.type === 'main' ? 'Main thread' : r.who}</Text>
               </Box>
-              {isWide && cell('m', 10, <Text dimColor wrap="truncate-end">{r.models.map(modelName).join(', ')}</Text>, false)}
+              {isWide && cell('m', 12, <Text dimColor wrap="truncate-end">{r.models.map(modelName).join(', ')}</Text>, false)}
               {isWide && cell('c', 6, n(String(r.usage.calls), { dim: true }))}
               {cell('w', 7, n(`${Math.round((100 * weighted(r.usage)) / tw)}%`, { dim: true }))}
               {cell('u', 8, n(usd(r.usage.usd * factor), { bold: true }))}

@@ -36,7 +36,7 @@ Click a section's title to open or close it. The top card is always shown. Sessi
 
 | Section | Shows | From |
 | --- | --- | --- |
-| **Vitals** (always shown) | model, effort and permission mode; whether a turn is running; time to first token; a context bar measured against the window the session compacts at (`autoCompactWindow` in settings, else the model's window), amber at 65% and red at 85%; compactions; cost; how long the session has run and how much of that was active; the 5-hour and 7-day limits with time to reset | `turn.step`, `session.measure`, `session.compact`, `$.session.usage()`, the transcript |
+| **Vitals** (always shown) | model, effort and permission mode; whether a turn is running; time to first token; a context bar measured against the window the session compacts at (`autoCompactWindow` in settings, else the model's window), amber at 65% and red at 85%; compactions; cost, how long the session has run, how much of that was active, and request count, a row that pressing the model's name folds away (Session totals shows the same figures); the 5-hour and 7-day limits with time to reset | `turn.step`, `session.measure`, `session.compact`, `$.session.usage()`, the transcript |
 | **Session totals** | every request in the session, from the main thread and from sub-agents: request count, fresh tokens, cache reads, weighted tokens; a bar per kind of token showing its share of the weighted cost (input green, cache write amber, cache read red, output orange), then, after a thin line, its token count and share of all tokens; cost by who made the request and which model | the transcripts, read again after each turn |
 | **Tasks** | one card per task (a task runs from one `mark_task` call to the next): its time, requests, cost, kinds of token, and who spent them | `turn.step` |
 | **Recent requests** | the last 15 model requests: time, who, model, input and cache-write tokens, cache reads, output, cost | `turn.step` |
@@ -100,7 +100,7 @@ What it keeps lives in session state and ends with the session. It makes **no** 
 | [`hooks/register.tsx`](hooks/register.tsx) | the event hooks and the pane |
 | [`hooks/core.ts`](hooks/core.ts) | prices, sums and formatting, as plain functions |
 | [`hooks/scan.py`](hooks/scan.py) | reads the session's transcripts for totals and active time |
-| [`hooks/pane.test.tsx`](hooks/pane.test.tsx) | 17 tests: drawing, opening and closing sections, permission tallies, the context limit, cache-write pricing by cache length, the Cache health section and its Vitals line, and every width from 24 to 120 columns on the terminal and the desktop |
+| [`hooks/pane.test.tsx`](hooks/pane.test.tsx) | 19 tests: drawing, opening and closing sections, folding the Vitals stats row, permission tallies, the context limit, cache-write pricing by cache length, the Cache health section and its Vitals lines (memory index, requests this turn), and every width from 24 to 120 columns on the terminal and the desktop |
 | [`hooks/scan_test.py`](hooks/scan_test.py) | `python3 -I hooks/scan_test.py`: transcript reading — one-hour writes when a response has no split, the cap at the write, empty placeholder lines skipped, two responses in the same millisecond, rebuild labels |
 | [`types/index.d.ts`](types/index.d.ts) | the state contract |
 
