@@ -1,6 +1,8 @@
 # Session Watcher
 
-A Claude Code mod that shows one pane with everything about the current session. It combines the token-use mod with ideas from [Flightdeck](https://github.com/scasella/claude-flightdeck).
+**A Claude Code mod that puts your session's cost, tokens and activity in one pane**: context and rate limits, Claude Code's own cost, token use for the whole session, per task and per request, your sub-agents, every permission check, and a log of what happened. Every number comes from a real session event or the session's own transcript, and nothing leaves your machine.
+
+It builds on the token-use mod and takes ideas from [Flightdeck](https://github.com/scasella/claude-flightdeck).
 
 <p align="center"><img src="docs/session-watcher.png" alt="The Session Watcher pane: vitals with context, cost and rate limits, then session totals, tasks and recent requests" width="520"></p>
 
@@ -18,34 +20,96 @@ Answer `y` to add the marketplace, then pick a scope. From a shell:
 claude plugin install session-watcher --marketplace machinataph-hash/session-watcher
 ```
 
-It needs `python3` on your PATH for the session totals and active time.
+It needs `python3` on your PATH for the session totals and active time. Mods are an early-access Claude Code feature, and their API can change between releases.
 
 ## Use
 
-Open it with `/session-watcher`. Close it with `/session-watcher close`. `/session-watcher reset` puts the sections back to how they start.
-
-## What it shows
-
-Each section opens and closes when you click its title. Vitals is always shown. Session totals and Tasks start open. The other sections start closed.
-
-| Section | Shows |
+| Command | Does |
 | --- | --- |
-| Vitals | model, effort, permission mode, how full the context is, compactions, cost, how long the session has run and been active, rate limits with time to reset, time to first token |
-| Session totals | every request in the session, main thread and sub-agents, read from the transcripts after each turn; token kinds; cost split by who made the request and which model |
-| Tasks | token use and cost per task. A task runs from one `mark_task` call to the next. |
-| Recent requests | the last 15 model requests: who made them, the model, the tokens and the cost |
-| Sub-agents | each sub-agent: whether it is running, how many steps it has taken, its context size, its output, its last tool call |
-| Permissions | permission checks allowed, asked and denied, by kind of tool, plus the latest checks |
-| Last turn | how long it took, cost added, tool calls, edits, errors |
-| Activity | prompts, sub-agent starts and finishes, edits, errors, denials, compactions |
+| `/session-watcher` | open the pane |
+| `/session-watcher close` | close it |
+| `/session-watcher reset` | put every section back to its starting open or closed state |
 
-## How cost is worked out
+Click a section's title to open or close it. The top card is always shown. Session totals and Tasks start open, and the rest start closed, so you choose what you see.
 
-The session cost is Claude Code's own total. Each row's cost is its tokens priced at list price, then scaled so all the rows add up to that total.
+## What you see
+
+| Section | Shows | From |
+| --- | --- | --- |
+| **Vitals** (always shown) | model, effort and permission mode; whether a turn is running; time to first token; a context bar that turns amber at 65% and red at 85%; compactions; cost; how long the session has run and how much of that was active; the 5-hour and 7-day limits with time to reset | `turn.step`, `session.measure`, `session.compact`, `$.session.usage()`, the transcript |
+| **Session totals** | every request in the session, from the main thread and from sub-agents: request count, fresh tokens, cache reads, weighted tokens; a bar per kind of token; cost by who made the request and which model | the transcripts, read again after each turn |
+| **Tasks** | one card per task (a task runs from one `mark_task` call to the next): its time, requests, cost, kinds of token, and who spent them | `turn.step` |
+| **Recent requests** | the last 15 model requests: time, who, model, input and cache-write tokens, cache reads, output, cost | `turn.step` |
+| **Sub-agents** | each sub-agent: running, done or failed; its task; type; model; steps; context size; output; run time; its last tool call | `agent.spawn`, `turn.step`, `tool.call`, `turn.complete` |
+| **Permissions** | checks allowed, asked and denied, by kind of tool (file, shell, web, agent, other), a bar of the mix, and the latest 6 checks with secrets masked | `tool.check` |
+| **Last turn** | how long it took, the cost it added, tool calls, edits, errors, sub-agents started | `turn.start`, `tool.call`, `turn.complete` |
+| **Activity** | your prompts (first 70 characters), sub-agents starting and finishing, edits, failed tool calls, denials, compactions | all of the above |
+
+Two buttons copy the task summary and the full request log (up to 5,000 requests) as CSV.
+
+It fits the space it has. On a narrow pane, rows drop their less important columns and the bars get shorter. The terminal draws bars as block characters, and the desktop app draws them as SVG.
+
+## Tasks and `mark_task`
+
+The mod adds a tool, `mark_task`. When Claude calls it with a label (for example "A2 build"), every later request from the main thread and from sub-agents counts toward that task until the next call. The tool returns the totals of the task that just ended. A sub-agent stays with the task it started under. A call to token-use's own `mark_task` starts a task here too, so the two mods stay in step.
+
+## How the numbers are worked out
+
+- **Session cost** is Claude Code's own total, the one `/cost` shows.
+- **The cost of a row, task or request** is its tokens priced at list price, then scaled so the rows add up to Claude Code's total. The list prices are only used as ratios between models. Fable is priced like Opus until its price is known.
+- **Session totals** come from the transcripts, the main one and each sub-agent's. A response is written there as several lines that repeat its usage, so each response is counted once, by its message id. This also counts requests made before the mod was loaded.
+- **Weighted** = input ×1 + cache write ×1.25 + cache read ×0.1 + output ×5. These are the price ratios, so weighted tokens compare cost, not volume. **Fresh** = input + cache write + output: the tokens paid at full price.
+- **Active time** is time with a turn running, read from the transcript: from a prompt to the main thread's end of turn. Sub-agents run inside a turn, so they add no time of their own.
+- **Time to first token** is timed at the mod's own hook, so it includes the network and anything else that runs before the response's first piece. When thinking isn't streamed, it includes the thinking.
+
+## What is estimated, not measured
+
+- Per-row cost, as above: Claude Code reports one total, not a cost per request.
+- Tasks, recent requests and sub-agent cards only count what happened while the mod was loaded. Session totals count the whole session.
+- Session totals update after each turn, so during a long turn they trail the live task count.
+- A sub-agent's context size is the whole input of its latest request.
+
+## What it can reach
+
+Session Watcher only watches. Every hook passes its event on unchanged: it never denies, rewrites or delays a tool call, a prompt or a sub-agent. If its own bookkeeping fails, the event still passes through.
+
+| It sees or does | Through |
+| --- | --- |
+| model requests and their token usage | `turn.step` |
+| tool calls (name, path or command), whether they failed | `tool.call` |
+| permission verdicts | `tool.check` |
+| sub-agent starts and finishes | `agent.spawn`, `turn.complete` |
+| your prompts' first 70 characters, for the activity log | `turn.start` |
+| context, cost and rate limits | `session.measure`, `$.session.usage()` |
+| runs `python3 hooks/scan.py`, which reads this session's own transcripts under `~/.claude/projects` | `$.process.run` |
+| copies CSV to your clipboard when you press a button | `$.ui.copy` |
+
+What it keeps lives in session state and ends with the session. It makes **no** network requests, writes no files, and calls no model. Paths are shortened and anything that looks like a key or token is masked before it is shown. `claude plugin validate .` lists exactly what it hooks and calls.
+
+## Troubleshooting
+
+- **The pane doesn't open:** check `claude --version` is 2.1.308 or later, then run `/reload-plugins` and `/session-watcher`. Look in the transcript for a dim line starting `session-watcher:`; it names what failed.
+- **`/session-watcher` isn't in the `/` menu:** type it in full. Some surfaces list a mod's commands only after it has loaded.
+- **Session totals stay at 0 or say "Reading the transcripts…":** check `python3` is installed and on your PATH.
 
 ## Files
 
-- `hooks/register.tsx`: the event hooks and the pane
-- `hooks/core.ts`: prices, sums and formatting
-- `hooks/scan.py`: reads the session's transcripts for totals and active time
-- `hooks/pane.test.tsx`: tests, run with `claude plugin test .`
+| File | Holds |
+| --- | --- |
+| [`hooks/register.tsx`](hooks/register.tsx) | the event hooks and the pane |
+| [`hooks/core.ts`](hooks/core.ts) | prices, sums and formatting, as plain functions |
+| [`hooks/scan.py`](hooks/scan.py) | reads the session's transcripts for totals and active time |
+| [`hooks/pane.test.tsx`](hooks/pane.test.tsx) | 13 tests: drawing, opening and closing sections, permission tallies, and every width from 24 to 120 columns on the terminal and the desktop |
+| [`types/index.d.ts`](types/index.d.ts) | the state contract |
+
+## Develop
+
+```sh
+claude --plugin-dir .            # load it; edits reload
+claude plugin validate .
+claude plugin test .
+```
+
+## License
+
+[MIT](LICENSE)

@@ -1,5 +1,11 @@
 {
   "name": "session-watcher",
-  "owner": { "name": "machinataph-hash" },
-  "plugins": [{ "name": "session-watcher", "source": "./" }]
+  "owner": { "name": "machinataph-hash", "url": "https://github.com/machinataph-hash" },
+  "plugins": [
+    {
+      "name": "session-watcher",
+      "source": "./",
+      "description": "One pane for the whole session: cost, tokens per task and per request, sub-agents, permissions and activity."
+    }
+  ]
 }
