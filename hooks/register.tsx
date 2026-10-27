@@ -71,6 +71,9 @@ const DEFAULT_OPEN = ['session', 'tasks']
 const VITALS_FOLDED = 'vitals-folded'
 // Cache health limits: past either, a line in the Vitals card says so.
 const MEMORY_MAX = 4200
+// The memory index bar: 10k wide, green to 4,200, orange to 5,800, red past it.
+const MEMORY_BAR = 10000
+const MEMORY_RED = 5800
 const TURN_MAX = 15
 const sections = atom({ plugin: 'session-watcher', key: 'sections' } as const, DEFAULT_OPEN)
 // Tasks whose open state differs from their default (the current task starts open, earlier ones closed).
@@ -667,8 +670,10 @@ export const register: Register = on => {
     // ---- cache health: read from the transcripts; requests this turn from the live log
     const ch = sc.cache
     const turnReqs = tn && tn.startedAt > 0 ? log0.filter(c => c.who === 'main thread' && c.at >= tn.startedAt).length : 0
+    const memColor: BarColor = !ch || ch.memoryChars === null ? 'inactive' : ch.memoryChars > MEMORY_RED ? 'error' : ch.memoryChars > MEMORY_MAX ? 'warning' : 'success'
+    const memWord = memColor === 'error' ? 'red' : memColor === 'warning' ? 'orange' : 'green'
     const cacheWarnings = [
-      ...(ch && ch.memoryChars !== null && ch.memoryChars > MEMORY_MAX ? [`memory index ${k(ch.memoryChars)} chars (over ${MEMORY_MAX.toLocaleString('en-US')})`] : []),
+      ...(ch && ch.memoryChars !== null && ch.memoryChars > MEMORY_MAX ? [`memory index ${k(ch.memoryChars)} chars (target ${MEMORY_MAX.toLocaleString('en-US')})`] : []),
       ...(turnReqs > TURN_MAX ? [`${turnReqs} requests this turn (over ${TURN_MAX})`] : []),
     ]
     // The title folds away the stats row (cost, running for, active, requests); Session totals keeps cost and requests.
@@ -1044,12 +1049,23 @@ export const register: Register = on => {
             stats('c', [
               stat('f', 'STARTING LOAD', k(ch.first), { sub: 'first request' }),
               stat('t', 'REQUESTS THIS TURN', String(turnReqs), { color: turnReqs > TURN_MAX ? 'error' : undefined, sub: `limit ${TURN_MAX}` }),
-              stat('m', 'MEMORY INDEX', ch.memoryChars === null ? '—' : `${k(ch.memoryChars)} chars`, {
-                color: ch.memoryChars !== null && ch.memoryChars > MEMORY_MAX ? 'error' : undefined,
-                sub: `limit ${MEMORY_MAX.toLocaleString('en-US')}`,
-              }),
               stat('r', 'REBUILDS', String(ch.rebuildCount), { sub: `${k(ch.rebuildTokens)} written` }),
             ]),
+            ch.memoryChars !== null && (
+              <Box key="mem" flexDirection="column">
+                <Box key="h" flexDirection="row" justifyContent="space-between">
+                  {heading('l', 'MEMORY INDEX')}
+                  <Text tabular dimColor>
+                    {`${ch.memoryChars.toLocaleString('en-US')} / ${MEMORY_BAR.toLocaleString('en-US')} chars`}
+                    <Text color={memColor} bold>{`  ${memWord}`}</Text>
+                  </Text>
+                </Box>
+                {strip('bar', [{ value: Math.min(1, ch.memoryChars / MEMORY_BAR), color: memColor }], { track: true, cells: inner })}
+                <Text size="footnote" dimColor tabular wrap="truncate-end">
+                  {`green to ${MEMORY_MAX.toLocaleString('en-US')} (target) · orange to ${MEMORY_RED.toLocaleString('en-US')} · red past it`}
+                </Text>
+              </Box>
+            ),
             <Box key="rb" flexDirection="column">
               {heading('h', 'REBUILDS · REQUESTS WRITING OVER 50K')}
               {ch.rebuilds.length === 0 ? (
