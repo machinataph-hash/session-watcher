@@ -697,22 +697,29 @@ export const register: Register = on => {
       </Box>
     )
 
-    // ---- token kinds: one row per kind; the bar and % are its share of all tokens, COST its share of the weighted cost
+    // ---- token kinds: one row per kind; the bar and COST are its share of the weighted cost, then its tokens and their share
     const KIND_W = 11
     const kinds = (key: string, u: Usage, room = inner) => {
       const tokens = u.input + u.cacheWrite + u.cacheRead + u.output
       const cost = weighted(u)
-      const hasTokens = room >= 36
-      const hasCost = room >= 30
-      const barW = room - KIND_W - 1 - (hasTokens ? 8 : 0) - 6 - (hasCost ? 6 : 0)
+      // Cost leads: the bar and COST are the kind's share of the weighted cost; after a thin line, its tokens and their share.
+      // The token side (line, TOKENS, %) shows whole or not at all, so the bar keeps at least 10 cells.
+      const hasTokens = room >= 44
+      const barW = room - KIND_W - 1 - 6 - (hasTokens ? 2 + 8 + 6 : 0)
+      const line = (k: string) => (
+        <Box key={k} width={1} flexShrink={0}>
+          <Text dimColor>│</Text>
+        </Box>
+      )
       return (
         <Box key={key} flexDirection="column">
           <Box key="head" flexDirection="row" gap={1}>
             <Box width={KIND_W} flexShrink={0}>{heading('k', 'KIND')}</Box>
-            <Box flexGrow={1} flexShrink={1} minWidth={0}>{heading('b', barW >= 20 ? 'SHARE OF TOKENS' : 'SHARE')}</Box>
+            <Box flexGrow={1} flexShrink={1} minWidth={0}>{heading('b', barW >= 16 ? 'SHARE OF COST' : 'SHARE')}</Box>
+            {cell('c', 5, heading('c', 'COST'))}
+            {hasTokens && line('l')}
             {hasTokens && cell('t', 7, heading('t', 'TOKENS'))}
-            {cell('p', 5, heading('p', '%'))}
-            {hasCost && cell('c', 5, heading('c', 'COST'))}
+            {hasTokens && cell('p', 5, heading('p', '%'))}
           </Box>
           {KINDS.map(kd => {
             const share = tokens > 0 ? u[kd.field] / tokens : 0
@@ -723,11 +730,12 @@ export const register: Register = on => {
                   <Text dimColor>{kd.name}</Text>
                 </Box>
                 <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                  {strip('bar', [{ value: share, color: kd.color }], { track: true, cells: barW })}
+                  {strip('bar', [{ value: costShare, color: kd.color }], { track: true, cells: barW })}
                 </Box>
-                {hasTokens && cell('t', 7, n(k(u[kd.field])))}
-                {cell('p', 5, n(`${Math.round(100 * share)}%`))}
-                {hasCost && cell('c', 5, n(`${Math.round(100 * costShare)}%`, { dim: true }))}
+                {cell('c', 5, n(`${Math.round(100 * costShare)}%`, { bold: true }))}
+                {hasTokens && line('l')}
+                {hasTokens && cell('t', 7, n(k(u[kd.field]), { dim: true }))}
+                {hasTokens && cell('p', 5, n(`${Math.round(100 * share)}%`, { dim: true }))}
               </Box>
             )
           })}
