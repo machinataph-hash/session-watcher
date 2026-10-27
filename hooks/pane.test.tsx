@@ -66,3 +66,22 @@ for (const surface of ['terminal', 'desktop'] as const)
       expect(await ui.find({ type: 'Text', text: /No finished turn yet/ })).toBeDefined()
     })
   }
+
+// The context bar measures against the window the session compacts at (autoCompactWindow), not the model's window.
+test('the context bar uses the compaction window from settings', async ($, on) => {
+  mock.clock(on)
+  on('session.usage', async (_$, e) =>
+    ({ value: {
+      startedAt: 0,
+      rateLimits: [],
+      context: {
+        window: 1_000_000,
+        ...((e as { breakdown?: string }).breakdown ? { breakdown: { categories: [], totalTokens: 150_000, maxTokens: 300_000, rawMaxTokens: 300_000, autocompactSource: 'settings', percentage: 50, gridRows: [], model: 'claude-opus-5-5', memoryFiles: [], mcpTools: [], agents: [], isAutoCompactEnabled: true, apiUsage: null } } : {}),
+      },
+    } }) as never)
+  await start($, on)
+  await ($.session.measure as (e: unknown) => Promise<unknown>)({ context: { tokens: 150_000, window: 1_000_000, percent: 15 }, rateLimits: [], changed: ['context'] }).catch(() => undefined)
+  const ui = await mount($, 'terminal')
+  expect(await ui.find({ type: 'Text', text: /150k \/ 300k/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /50%/ })).toBeDefined()
+})

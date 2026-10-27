@@ -27,6 +27,8 @@ export type Vitals = {
   mode: string
   ctxTokens: number | null
   ctxWindow: number
+  /** the window the session compacts at (settings' autoCompactWindow), 0 until read */
+  ctxLimit: number
   ctxPct: number | null
   costUsd: number | null
   limits: Limit[]

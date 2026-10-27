@@ -48,6 +48,7 @@ const DEFAULT_VITALS: Vitals = {
   mode: '',
   ctxTokens: null,
   ctxWindow: 0,
+  ctxLimit: 0,
   ctxPct: null,
   costUsd: null,
   limits: [],
@@ -81,11 +82,15 @@ const limitOf = (l: { kind: string; percentUsed: number; resetsAt?: string }): L
   resetsAt: l.resetsAt ? Date.parse(l.resetsAt) || null : null,
 })
 
-const readUsage = async ($: EngineInterface) => {
-  const u = await $.session.usage().catch(() => null)
+// The context limit is the compaction window when settings set one (autoCompactWindow), else the model's window.
+// Only the breakdown carries it; `summary` estimates locally and sends no request, so it is read once a session.
+const readUsage = async ($: EngineInterface, withLimit = false) => {
+  const u = await $.session.usage(withLimit ? { breakdown: 'summary' } : undefined).catch(() => null)
   if (!u) return
+  const limit = u.context.breakdown?.rawMaxTokens
   await update($, vitals, v => ({
     ...v,
+    ...(limit ? { ctxLimit: limit } : {}),
     ctxTokens: u.context.tokens ?? null,
     ctxWindow: u.context.window,
     ctxPct: u.context.percent ?? null,
@@ -162,7 +167,7 @@ export const register: Register = on => {
     })
     const now = await $.clock.now()
     await update($, tasks, l => (l.length === 0 ? [newTask('Unlabelled', now)] : l))
-    await readUsage($)
+    await readUsage($, true)
     void readTranscript($)
     // The clocks move on their own, so the pane redraws each second.
     if (!ticking) {
@@ -494,9 +499,9 @@ export const register: Register = on => {
       text: '#6b6b6b', merged: '#8e5bd6', bashBorder: '#e0569f', planMode: '#23968a', inactive: '#a8a8a8', permission: '#7c83f2',
     }
     const KINDS = [
-      { field: 'input', name: 'input', weight: 1, color: 'suggestion' },
+      { field: 'input', name: 'input', weight: 1, color: 'success' },
       { field: 'cacheWrite', name: 'cache write', weight: 1.25, color: 'warning' },
-      { field: 'cacheRead', name: 'cache read', weight: 0.1, color: 'success' },
+      { field: 'cacheRead', name: 'cache read', weight: 0.1, color: 'error' },
       { field: 'output', name: 'output', weight: 5, color: 'claude' },
     ] as const
     const FAMILY: Record<string, BarColor> = { fable: 'merged', mythos: 'merged', opus: 'bashBorder', sonnet: 'planMode', haiku: 'inactive', other: 'permission' }
@@ -633,7 +638,9 @@ export const register: Register = on => {
     const total = sc.at > 0 ? scanTotal(sc) : list.reduce((acc, t) => sum(acc, taskTotal(t)), empty())
 
     // ---- vitals: always shown
-    const ctxPct = v.ctxPct ?? (v.ctxTokens !== null && v.ctxWindow > 0 ? Math.round((100 * v.ctxTokens) / v.ctxWindow) : null)
+    // Measured against the limit the session actually compacts at; the engine's own percent is against the model's window.
+    const ctxMax = v.ctxLimit > 0 ? v.ctxLimit : v.ctxWindow
+    const ctxPct = v.ctxTokens !== null && ctxMax > 0 ? Math.round((100 * v.ctxTokens) / ctxMax) : v.ctxLimit > 0 ? null : v.ctxPct
     const ctxColor: BarColor = ctxPct === null ? 'inactive' : ctxPct >= 85 ? 'error' : ctxPct >= 65 ? 'warning' : 'success'
     const runFor = now - sessionStart
     const actMs = activeMs(act, now)
@@ -655,7 +662,7 @@ export const register: Register = on => {
           <Box key="h" flexDirection="row" justifyContent="space-between">
             {heading('l', `CONTEXT${v.compactions > 0 ? ` · ⟲ ${v.compactions} compacted` : ''}`)}
             <Text tabular dimColor>
-              {v.ctxTokens !== null ? `${k(v.ctxTokens)} / ${k(v.ctxWindow)}` : '—'}
+              {v.ctxTokens !== null ? `${k(v.ctxTokens)} / ${k(ctxMax)}` : '—'}
               {ctxPct !== null ? <Text color={ctxColor} bold>{`  ${ctxPct}%`}</Text> : ''}
             </Text>
           </Box>
