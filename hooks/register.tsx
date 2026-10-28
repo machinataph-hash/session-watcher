@@ -1,6 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
+import type { LimitModel } from './core'
 import type { Active, AgentCard, Bucket, CacheHealth, Call, Check, Gate, Limit, LogLine, Receipt, Row, Scan, Task, Turn, Usage, Vitals } from '../types'
 import {
   BUCKETS,
@@ -13,8 +14,11 @@ import {
   dur,
   empty,
   emptyGate,
+  emptyLimitModel,
+  estimateLimit,
   factorOf,
   familyOf,
+  stepLimitModel,
   fresh,
   fromModel,
   hhmm,
@@ -93,12 +97,32 @@ const limitOf = (l: { kind: string; percentUsed: number; resetsAt?: string }): L
   resetsAt: l.resetsAt ? Date.parse(l.resetsAt) || null : null,
 })
 
+// Every reading feeds the shared limit model (all sessions' spend), one write at a time in this process,
+// and comes back with each limit's two-decimal estimate.
+const LIMIT_MODEL = 'limitModel'
+let limitQueue: Promise<unknown> = Promise.resolve()
+const withEstimates = ($: EngineInterface, cost: number | null, readings: Limit[]): Promise<Limit[]> => {
+  // A store that never answers must not hold up the readings: past two seconds the plain limits show.
+  const timeout = $.clock.sleep(2000).then(() => Promise.reject(new Error('store timed out')))
+  const run = limitQueue.then(() => Promise.race([timeout, (async () => {
+    const id = await $.session.id().catch(() => '')
+    const now = await $.clock.now()
+    const was = ((await $.store.get(LIMIT_MODEL)) as LimitModel | undefined) ?? emptyLimitModel()
+    const m = stepLimitModel(was, id, cost, readings, now)
+    await $.store.set(LIMIT_MODEL, m)
+    return readings.map(l => ({ ...l, est: estimateLimit(m, l) }))
+  })()]))
+  limitQueue = run.catch(() => undefined)
+  return run.catch(() => readings)
+}
+
 // The context limit is the compaction window when settings set one (autoCompactWindow), else the model's window.
 // Only the breakdown carries it; `summary` estimates locally and sends no request, so it is read once a session.
 const readUsage = async ($: EngineInterface, withLimit = false) => {
   const u = await $.session.usage(withLimit ? { breakdown: 'summary' } : undefined).catch(() => null)
   if (!u) return
   const limit = u.context.breakdown?.rawMaxTokens
+  const limits = await withEstimates($, u.cost?.usd ?? null, u.rateLimits.map(limitOf))
   await update($, vitals, v => ({
     ...v,
     ...(limit ? { ctxLimit: limit } : {}),
@@ -106,7 +130,7 @@ const readUsage = async ($: EngineInterface, withLimit = false) => {
     ctxWindow: u.context.window,
     ctxPct: u.context.percent ?? null,
     costUsd: u.cost?.usd ?? null,
-    limits: u.rateLimits.map(limitOf),
+    limits,
   }))
 }
 
@@ -342,13 +366,14 @@ export const register: Register = on => {
   })
 
   on('session.measure', async ($, e, next) => {
+    const limits = await withEstimates($, e.cost?.usd ?? null, e.rateLimits.map(limitOf))
     await update($, vitals, v => ({
       ...v,
       ctxTokens: e.context.tokens ?? null,
       ctxWindow: e.context.window,
       ctxPct: e.context.percent ?? null,
       costUsd: e.cost?.usd ?? null,
-      limits: e.rateLimits.map(limitOf),
+      limits,
     }))
     return next(e)
   }).catch(($, e, next) => next(e))
@@ -684,7 +709,6 @@ export const register: Register = on => {
           <Box flexGrow={1} flexShrink={1} minWidth={0}>
           <Button key="sec-vitals" plain onPress={() => void flip(VITALS_FOLDED)}>
             <Text bold wrap="truncate-end">
-              <Text dimColor>{vitalsOpen ? '▾ ' : '▸ '}</Text>
               <Text color={v.isRunning ? 'claude' : 'success'}>{v.isRunning ? '● ' : '○ '}</Text>
               {v.model ? modelName(v.model) : 'Session'}
               {v.effort ? <Text dimColor>{` · ${v.effort}`}</Text> : ''}
@@ -724,9 +748,9 @@ export const register: Register = on => {
                     <Text dimColor wrap="truncate-end">{name}</Text>
                   </Box>
                   <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                    {strip('b', [{ value: l.pct / 100, color: c }], { track: true, cells: inner - (isNarrow ? 8 : 13) - 6 - (isNarrow ? 0 : 11) - 3 })}
+                    {strip('b', [{ value: (l.est ?? l.pct) / 100, color: c }], { track: true, cells: inner - (isNarrow ? 8 : 13) - 9 - (isNarrow ? 0 : 11) - 3 })}
                   </Box>
-                  {cell('p', 5, n(`${Math.round(l.pct)}%`, { bold: true }))}
+                  {cell('p', 8, n(l.est != null ? `≈${l.est.toFixed(2)}%` : `${Math.round(l.pct)}%`, { bold: true }))}
                   {!isNarrow && cell('r', 10, <Text dimColor tabular size="footnote" wrap="truncate-end">{l.resetsAt ? `↻ ${untilReset(Math.max(0, l.resetsAt - now))}` : ''}</Text>)}
                 </Box>
               )

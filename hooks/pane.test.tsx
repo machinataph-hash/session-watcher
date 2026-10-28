@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
-import { breakdownText, fromModel, usdOf, weighted } from './core'
+import { breakdownText, emptyLimitModel, estimateLimit, fromModel, stepLimitModel, usdOf, weighted } from './core'
 
 const pane = { title: '', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} } as const
 const usage = { model: 'claude-opus-5-5', input_tokens: 1000, output_tokens: 2000, cache_read_input_tokens: 100000, cache_creation_input_tokens: 4000 }
@@ -208,4 +208,46 @@ test('context_breakdown: categories largest first, MCP tokens summed per server,
   expect(text).toContain('  MEMORY.md: 4,500')
   expect(text).toContain('Agents: 70 over 1')
   expect(text).toContain('Skills: 3,000, 38 of 40 listed')
+})
+
+// The limit estimator: $1 per percent, learned from two clean steps, shared across sessions.
+const H = 3_600_000
+const five = (pct: number, resetsAt = 5 * H) => [{ kind: 'five_hour', pct, resetsAt }]
+const one = (pct: number) => ({ kind: 'five_hour', pct, resetsAt: 10 * H })
+test('the limit estimate waits for two measured steps, then adds the spend since the last one', () => {
+  let m = stepLimitModel(emptyLimitModel(), 'a', 0, five(10), 0)
+  // The first reading falls somewhere inside 10%: no estimate, and its first step is not measured.
+  m = stepLimitModel(m, 'a', 0.4, five(10), 1)
+  expect(estimateLimit(m, one(10))).toBe(null)
+  m = stepLimitModel(m, 'a', 0.7, five(11), 2)
+  m = stepLimitModel(m, 'a', 1.7, five(12), 3)
+  expect(m.samples.five_hour).toEqual([1])
+  expect(estimateLimit(m, one(12))).toBe(null)
+  // A second session's spend counts too.
+  m = stepLimitModel(m, 'b', 0, five(12), 4)
+  m = stepLimitModel(m, 'b', 1, five(13), 5)
+  expect(m.samples.five_hour?.map(x => Math.round(x * 1e6) / 1e6)).toEqual([1, 1])
+  m = stepLimitModel(m, 'a', 2.05, five(13), 6)
+  expect(estimateLimit(m, one(13))).toBe(13.35)
+  // Spend past a full step without the percent moving stays below the next percent.
+  m = stepLimitModel(m, 'b', 3, five(13), 7)
+  expect(estimateLimit(m, one(13))).toBe(13.99)
+  // A bad cost is ignored, and a full limit shows no estimate.
+  expect(stepLimitModel(m, 'b', Number.NaN, five(13), 8).seen.b?.cost).toBe(3)
+  expect(estimateLimit({ ...m, tracks: { five_hour: { ...m.tracks.five_hour!, pct: 100 } } }, one(100))).toBe(null)
+})
+
+test('a new window at 0% starts clean, a shift of milliseconds is the same window, a lower cost adds nothing', () => {
+  let m = emptyLimitModel()
+  m = { ...m, samples: { five_hour: [2, 2] } }
+  m = stepLimitModel(m, 'a', 5, five(40), 0)
+  m = stepLimitModel(m, 'a', 5, five(0, 10 * H), 1)
+  expect(m.tracks.five_hour?.isClean).toBe(true)
+  m = stepLimitModel(m, 'a', 6, five(0, 10 * H + 346), 2)
+  expect(estimateLimit(m, one(0))).toBe(0.5)
+  // A cleared session reports a lower cost: nothing is subtracted, and its count starts again.
+  m = stepLimitModel(m, 'a', 0.2, five(0, 10 * H), 3)
+  expect(m.spent).toBe(1)
+  m = stepLimitModel(m, 'a', 0.6, five(0, 10 * H), 4)
+  expect(estimateLimit(m, one(0))).toBe(0.7)
 })

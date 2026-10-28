@@ -36,7 +36,13 @@ export type CacheHealth = {
   tools: { name: string; chars: number; at: number }[]
 }
 
-export type Limit = { kind: string; pct: number; resetsAt: number | null }
+export type Limit = {
+  kind: string
+  pct: number
+  resetsAt: number | null
+  /** two-decimal estimate from the spend since the last percent step; null until learned */
+  est?: number | null
+}
 export type Vitals = {
   model: string
   effort: string

@@ -192,3 +192,67 @@ export const breakdownText = (b: SessionContextBreakdown) => {
   if (b.slashCommands) out.push(`Slash commands: ${n(b.slashCommands.tokens)}, ${b.slashCommands.includedCommands} of ${b.slashCommands.totalCommands} listed`)
   return out.join('\n')
 }
+
+// Plan-limit estimator. The engine gives each limit as a whole percent, so the pane learns how many
+// dollars of spend one percent takes, from the spend counted between percent steps across sessions
+// (kept in $.store), and adds the spend since the last step to the shown percent.
+export type LimitTrack = { pct: number; resetsAt: number | null; spent: number; isClean: boolean }
+export type LimitModel = {
+  /** dollars counted by every session since the model began */
+  spent: number
+  /** each session's last cost, so only its new spend is added */
+  seen: Record<string, { cost: number; at: number }>
+  tracks: Record<string, LimitTrack>
+  /** dollars per one percent, the last few steps, per limit */
+  samples: Record<string, number[]>
+}
+type LimitReading = { kind: string; pct: number; resetsAt: number | null }
+export const LIMIT_SAMPLES = 5
+const SEEN_DAYS = 8
+// The engine's reset time moves by milliseconds between readings; a new window moves it by hours.
+const isSameWindow = (a: number | null, b: number | null) => (a === null || b === null ? a === b : Math.abs(a - b) <= 60_000)
+
+export const emptyLimitModel = (): LimitModel => ({ spent: 0, seen: {}, tracks: {}, samples: {} })
+
+export const stepLimitModel = (m: LimitModel, session: string, cost: number | null, limits: LimitReading[], now: number): LimitModel => {
+  let spent = m.spent
+  const seen = { ...m.seen }
+  if (cost !== null && Number.isFinite(cost) && session) {
+    const was = seen[session]?.cost
+    // A session's cost only grows; a lower one (a cleared session) starts its count again.
+    if (was !== undefined && cost > was) spent += cost - was
+    seen[session] = { cost, at: now }
+  }
+  for (const [id, s] of Object.entries(seen)) if (now - s.at > SEEN_DAYS * 86_400_000) delete seen[id]
+  const tracks = { ...m.tracks }
+  const samples = { ...m.samples }
+  for (const l of limits) {
+    const t = tracks[l.kind]
+    const isNewWindow = t !== undefined && !isSameWindow(t.resetsAt, l.resetsAt)
+    if (!t || isNewWindow || l.pct < t.pct) {
+      // A fresh window at 0% starts exactly at a step; anything else waits for the next step.
+      tracks[l.kind] = { pct: l.pct, resetsAt: l.resetsAt, spent, isClean: isNewWindow && l.pct === 0 }
+    } else if (l.pct > t.pct) {
+      if (t.isClean && spent > t.spent) samples[l.kind] = [...(samples[l.kind] ?? []), (spent - t.spent) / (l.pct - t.pct)].slice(-LIMIT_SAMPLES)
+      tracks[l.kind] = { pct: l.pct, resetsAt: l.resetsAt, spent, isClean: true }
+    } else tracks[l.kind] = { ...t, resetsAt: l.resetsAt }
+  }
+  return { spent, seen, tracks, samples }
+}
+
+const median = (xs: number[]) => {
+  const s = [...xs].sort((a, b) => a - b)
+  const mid = s.length >> 1
+  return s.length % 2 ? (s[mid] ?? 0) : ((s[mid - 1] ?? 0) + (s[mid] ?? 0)) / 2
+}
+
+/** The limit's percent to two decimals, or null until two steps have been measured. */
+export const estimateLimit = (m: LimitModel, l: LimitReading): number | null => {
+  const t = m.tracks[l.kind]
+  const xs = m.samples[l.kind] ?? []
+  if (!t || !t.isClean || t.pct !== l.pct || l.pct >= 100 || xs.length < 2) return null
+  const perPct = median(xs)
+  if (!(perPct > 0)) return null
+  // The engine rounds down, so the true value sits between pct and pct + 1.
+  return Math.round(100 * Math.min(l.pct + 0.99, l.pct + (m.spent - t.spent) / perPct)) / 100
+}
