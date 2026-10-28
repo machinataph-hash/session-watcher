@@ -867,7 +867,9 @@ export const register: Register = on => {
               </Text>
             </Box>
           )}
-          {pressable('settings', [{ text: '⚙', color: settingsOpen ? 'claude' : undefined, dim: !settingsOpen, size: 'title' }], () => void flip(SETTINGS_OPEN))}
+          <Box key="cog" width={2} flexShrink={0}>
+            {pressable('settings', [{ text: '⚙', color: settingsOpen ? 'claude' : undefined, dim: !settingsOpen, size: 'title' }], () => void flip(SETTINGS_OPEN))}
+          </Box>
         </Box>
         {settingsOpen && (
           <Box key="settings-body" flexDirection="column" gap={1}>
