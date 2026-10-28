@@ -95,6 +95,9 @@ const CHIPS = 'section-chips'
 const OPTIONS = 'settings-options'
 // A pressable title drawn on its own surface: press:sec:<section id> or press:task:<startedAt>.
 const PRESS = 'press:'
+// Every card, outer section or inner (a task, a sub-agent), is drawn alike: sections can be moved, so
+// no card may look like a special first one. The current task is marked by its "now" tag, not its border.
+const CARD = { flexDirection: 'column', borderStyle: 'single', borderDimColor: true, paddingX: 1 } as const
 // Tasks whose open state differs from their default (the current task starts open, earlier ones closed).
 const taskToggles = atom({ plugin: 'session-watcher', key: 'taskToggles' } as const, [] as number[])
 const copied = atom({ plugin: 'session-watcher', key: 'copied' } as const, '')
@@ -695,13 +698,13 @@ export const register: Register = on => {
     }
 
     // One collapsible section: a header row that opens and closes it, a one-line summary while closed.
-    const section = (id: string, title: string, summary: string, body: () => unknown, accent = false) => {
+    const section = (id: string, title: string, summary: string, body: () => unknown) => {
       const o = isOpen(id)
       return (
-        <Box key={id} flexDirection="column" borderStyle="round" borderColor={accent ? 'claude' : undefined} borderDimColor={!accent} paddingX={1} gap={o ? 1 : 0} hover={{ borderDimColor: false }}>
+        <Box key={id} {...CARD} gap={o ? 1 : 0}>
           <Box key="head" flexDirection="row" gap={1} alignItems="center">
             <Box flexGrow={1} flexShrink={1} minWidth={0}>
-              {pressable(theme ? `${PRESS}sec:${id}` : `sec-${id}`, [{ text: o ? '▾ ' : '▸ ', dim: true }, { text: title, bold: true, color: accent ? 'claude' : undefined }], () => void flip(id))}
+              {pressable(theme ? `${PRESS}sec:${id}` : `sec-${id}`, [{ text: o ? '▾ ' : '▸ ', dim: true }, { text: title, bold: true }], () => void flip(id))}
             </Box>
             {summary !== '' && (
               <Box flexShrink={1} minWidth={0}>
@@ -794,7 +797,7 @@ export const register: Register = on => {
       </Box>
     )
     const vitalsCard = (
-      <Box key="vitals" flexDirection="column" borderStyle="round" borderColor="claude" paddingX={1} gap={1}>
+      <Box key="vitals" {...CARD} gap={1}>
         <Box key="title" flexDirection="row" flexWrap="wrap" columnGap={2} justifyContent="space-between">
           <Box flexGrow={1} flexShrink={1} minWidth={0}>
           {pressable(theme ? `${PRESS}sec:${VITALS_FOLDED}` : 'sec-vitals', [
@@ -1049,7 +1052,7 @@ export const register: Register = on => {
       const isNow = t === last
       const o = taskOpen(t)
       return (
-        <Box key={`task-${t.startedAt}`} flexDirection="column" borderStyle="round" borderColor={isNow ? 'claude' : undefined} borderDimColor={!isNow} paddingX={1} gap={o ? 1 : 0}>
+        <Box key={`task-${t.startedAt}`} {...CARD} gap={o ? 1 : 0}>
           <Box key="head" flexDirection="row" gap={1} alignItems="center">
             <Box flexGrow={1} flexShrink={1} minWidth={0}>
               {pressable(theme ? `${PRESS}task:${t.startedAt}` : `open-${t.startedAt}`, [
@@ -1130,7 +1133,7 @@ export const register: Register = on => {
               const color = c.status === 'running' ? 'claude' : c.status === 'done' ? 'success' : 'error'
               const took = (c.endedAt ?? now) - c.spawnedAt
               return (
-                <Box key={c.id} flexDirection="column" borderStyle="round" borderDimColor paddingX={1}>
+                <Box key={c.id} {...CARD}>
                   <Box key="h" flexDirection="row" gap={1}>
                     <Box flexGrow={1} flexShrink={1} minWidth={0}>
                       <Text wrap="truncate-end">

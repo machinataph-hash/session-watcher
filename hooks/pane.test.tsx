@@ -413,3 +413,17 @@ for (const id of Object.keys(THEMES))
       expect(p.bg ?? p.palette?.bg).toBe(t.card)
     }
   })
+
+// Sections can be moved, so every card is drawn alike: one border style and colour, whatever its place.
+for (const surface of ['terminal', 'desktop'] as const)
+  for (const id of [null, ...Object.keys(THEMES)])
+    test(`${surface}, ${id ?? 'original'}: every card has the same border`, async ($, on) => {
+      mock.clock(on)
+      mock.store(on, id ? { layout: { theme: id } } : {})
+      await start($, on)
+      const ui = await mount($, surface)
+      const cards = (await ui.findAll({ type: 'Box' })).filter(b => (b as any).props?.borderStyle !== undefined)
+      expect(cards.length).toBeGreaterThan(3)
+      const look = (b: any) => JSON.stringify([b.props.borderStyle, b.props.borderColor ?? null, b.props.borderDimColor ?? null, b.props.backgroundColor ?? null, b.props.hover ?? null])
+      expect(new Set(cards.map(look)).size).toBe(1)
+    })
