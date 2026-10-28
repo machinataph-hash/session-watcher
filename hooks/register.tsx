@@ -727,7 +727,7 @@ export const register: Register = on => {
     const ch = sc.cache
     const turnReqs = tn && tn.startedAt > 0 ? log0.filter(c => c.who === 'main thread' && c.at >= tn.startedAt).length : 0
     const memColor: BarColor = !ch || ch.memoryChars === null ? 'inactive' : ch.memoryChars > MEMORY_RED ? 'error' : ch.memoryChars > MEMORY_MAX ? 'warning' : 'success'
-    const memWord = memColor === 'error' ? 'red' : memColor === 'warning' ? 'orange' : 'green'
+    const memWord = memColor === 'error' ? 'Bad' : memColor === 'warning' ? 'Fine' : 'Good'
     const cacheWarnings = [
       ...(ch && ch.memoryChars !== null && ch.memoryChars > MEMORY_MAX ? [`memory index ${k(ch.memoryChars)} chars (target ${MEMORY_MAX.toLocaleString('en-US')})`] : []),
     ]
@@ -826,7 +826,7 @@ export const register: Register = on => {
               {!isNarrow && cell('r', 10, <Text dimColor tabular size="footnote" wrap="truncate-end">{k(ch.memoryChars)} chars</Text>)}
             </Box>
             <Text key="why" size="footnote" dimColor wrap="wrap">
-              {`Memory index loaded into every request: ${ch.memoryChars.toLocaleString('en-US')} of ${MEMORY_BAR.toLocaleString('en-US')} chars. Green to ${MEMORY_MAX.toLocaleString('en-US')} (target), orange to ${MEMORY_RED.toLocaleString('en-US')}, red past it. Start ${k(ch.first)} · ${ch.rebuildCount} rebuild${ch.rebuildCount === 1 ? '' : 's'}.`}
+              {`Memory index loaded into every request: ${ch.memoryChars.toLocaleString('en-US')} of ${MEMORY_BAR.toLocaleString('en-US')} chars. Good to ${MEMORY_MAX.toLocaleString('en-US')} (target), Fine to ${MEMORY_RED.toLocaleString('en-US')}, Bad past it. Start ${k(ch.first)} · ${ch.rebuildCount} rebuild${ch.rebuildCount === 1 ? '' : 's'}.`}
             </Text>
           </Box>
         )}
@@ -1196,7 +1196,7 @@ export const register: Register = on => {
                 </Box>
                 {strip('bar', [{ value: Math.min(1, ch.memoryChars / MEMORY_BAR), color: memColor }], { track: true, cells: inner })}
                 <Text size="footnote" dimColor tabular wrap="truncate-end">
-                  {`green to ${MEMORY_MAX.toLocaleString('en-US')} (target) · orange to ${MEMORY_RED.toLocaleString('en-US')} · red past it`}
+                  {`Good to ${MEMORY_MAX.toLocaleString('en-US')} (target) · Fine to ${MEMORY_RED.toLocaleString('en-US')} · Bad past it`}
                 </Text>
               </Box>
             ),
