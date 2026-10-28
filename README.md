@@ -4,7 +4,11 @@
 
 It builds on the token-use mod and takes ideas from [Flightdeck](https://github.com/scasella/claude-flightdeck).
 
-<p align="center"><img src="docs/session-watcher.png" alt="The Session Watcher pane: vitals with context, cost and rate limits, then session totals, tasks and recent requests" width="520"></p>
+<p align="center">
+  <img src="docs/pane-original.png" alt="The Session Watcher pane in the Original theme: vitals with context, cost, rate limits and cache health, then session totals and tasks" width="400">
+  <img src="docs/pane-frostwerk.png" alt="The same pane in the Frostwerk theme" width="400">
+</p>
+<p align="center"><sub>The Original theme (left) and Frostwerk (right).</sub></p>
 
 ## Install
 
@@ -30,26 +34,31 @@ It needs `python3` on your PATH for the session totals and active time. Mods are
 | `/session-watcher close` | close it |
 | `/session-watcher reset` | put every section back to its starting open or closed state |
 
-Click a section's title to open or close it. The top card is always shown. Session totals and Tasks start open, and the rest start closed, so you choose what you see.
+Click a section's title to open or close it. The top card is always shown. Session totals and Tasks start open, and the rest start closed, so you choose what you see. The pane opens by itself when a session starts.
 
 ## What you see
 
 | Section | Shows | From |
 | --- | --- | --- |
-| **Vitals** (always shown) | model, effort and permission mode; whether a turn is running; time to first token; a context bar measured against the window the session compacts at (`autoCompactWindow` in settings, else the model's window), amber at 65% and red at 85%; compactions; cost, how long the session has run, how much of that was active, and request count, a row that pressing the model's name folds away (Session totals keeps the cost and request count); the 5-hour and 7-day limits with time to reset; the engine gives whole percents, so once two percent steps have been measured each limit shows a two-decimal estimate (`≈37.42%`): the spend since the last step divided by the median dollars per percent of the last five steps, counted across every session that runs the mod (kept in the mod's store). Spend the mod does not see (claude.ai, other machines) makes it run low, and two sessions writing the store at once can drop one reading | `turn.step`, `session.measure`, `session.compact`, `$.session.usage()`, the transcript |
-| **Settings** (the ⚙ at the bottom right of Vitals) | a chip per section: tick it to show or hide that section, drag it to move the section; the layout is kept for later sessions (on mobile, an ↑ moves a section up a place). When the Cache health line shows, it takes the memory index's colour | the mod's store |
+| **Vitals** (always shown) | model, effort and permission mode; whether a turn is running; time to first token; a context bar measured against the window the session compacts at (`autoCompactWindow` in settings, else the model's window), amber at 65% and red at 85%; compactions; cost, how long the session has run, how much of that was active, and request count, a row that pressing the model's name folds away (Session totals keeps the cost and request count); the 5-hour and 7-day limits with time to reset; the engine gives whole percents, so once two percent steps have been measured each limit shows a two-decimal estimate (`37.42%`): the spend since the last step divided by the median dollars per percent of the last five steps, counted across every session that runs the mod (kept in the mod's store). Spend the mod does not see (claude.ai, other machines) makes it run low, and two sessions writing the store at once can drop one reading; a Cache health bar (the memory index out of 10,000 characters, marked Good, Fine or Bad) with a line under it explaining the figures, which the settings can hide | `turn.step`, `session.measure`, `session.compact`, `$.session.usage()`, the transcript |
+| **Settings** (the ⚙ at the bottom right of Vitals) | a chip per section: tick it to show or hide that section, drag it to move the section (on mobile, an ↑ moves a section up a place); a checkbox that hides the Cache health bar from the Vitals card; and a theme: **Original** (the app's own colours), **Frostwerk** (dark, from Blueprint's Frostwerk brand) or **Reader** (light paper colours, from the Blueprint Reader). The layout and theme are kept for later sessions | the mod's store |
 | **Session totals** | every request in the session, from the main thread and from sub-agents: request count, fresh tokens, cache reads, weighted tokens; a bar per kind of token showing its share of the weighted cost (input green, cache write amber, cache read red, output orange), then, after a thin line, its token count and share of all tokens; cost by who made the request and which model | the transcripts, read again after each turn |
 | **Tasks** | one card per task (a task runs from one `mark_task` call to the next): its time, requests, cost, kinds of token, and who spent them | `turn.step` |
 | **Recent requests** | the last 15 model requests: time, who, model, input and cache-write tokens, cache reads, output, cost | `turn.step` |
 | **Sub-agents** | each sub-agent: running, done or failed; its task; type; model; steps; context size; output; run time; its last tool call | `agent.spawn`, `turn.step`, `tool.call`, `turn.complete` |
 | **Permissions** | checks allowed, asked and denied, by kind of tool (file, shell, web, agent, other), a bar of the mix, and the latest 6 checks with secrets masked | `tool.check` |
-| **Cache health** (closed at first) | the starting load (the context of the session's first request), requests in the current turn (highlighted past 15), the memory index as a bar out of 10,000 characters (green up to the 4,200 target, orange up to 5,800, red past that), cache rebuilds (main-thread requests writing over 50k, each labelled session start, after a summary, idle over 1 hour, or other) and the 10 largest tool results so far. When a figure is past its limit, one line in the Vitals card says which | the transcripts; requests this turn from `turn.step` |
+| **Cache health** (closed at first) | the starting load (the context of the session's first request), requests in the current turn (highlighted past 15), the memory index as a bar out of 10,000 characters (Good up to the 4,200 target, Fine up to 5,800, Bad past that), cache rebuilds (main-thread requests writing over 50k, each labelled session start, after a summary, idle over 1 hour, or other) and the 10 largest tool results so far. When the memory index is past its target, one line in the Vitals card says so | the transcripts; requests this turn from `turn.step` |
 | **Last turn** | how long it took, the cost it added, tool calls, edits, errors, sub-agents started | `turn.start`, `tool.call`, `turn.complete` |
 | **Activity** | your prompts (first 70 characters), sub-agents starting and finishing, edits, failed tool calls, denials, compactions | all of the above |
 
 Two buttons copy the task summary and the full request log (up to 5,000 requests) as CSV.
 
-It fits the space it has. On a narrow pane, rows drop their less important columns and the bars get shorter. The terminal draws bars as block characters, and the desktop app draws them as SVG.
+<p align="center">
+  <img src="docs/settings.png" alt="The settings panel: section chips to show, hide and reorder sections, the Cache health bar checkbox, and the theme choice" width="400">
+  <img src="docs/recent-requests.png" alt="The Recent requests section and the CSV buttons" width="380">
+</p>
+
+It fits the space it has. On a wide pane, each row of figures spreads from edge to edge. On a narrow pane, rows drop their less important columns and the bars get shorter. The terminal draws bars as block characters, and the desktop app draws them as SVG.
 
 ## Tasks and `mark_task`
 
@@ -103,7 +112,7 @@ What it keeps lives in session state and ends with the session. It makes **no** 
 | [`hooks/register.tsx`](hooks/register.tsx) | the event hooks and the pane |
 | [`hooks/core.ts`](hooks/core.ts) | prices, sums and formatting, as plain functions |
 | [`hooks/scan.py`](hooks/scan.py) | reads the session's transcripts for totals and active time |
-| [`hooks/pane.test.tsx`](hooks/pane.test.tsx) | 27 tests: the section chips (hide, drag, a saved layout), the limit estimator, drawing, opening and closing sections, folding the Vitals stats row (terminal and desktop), permission tallies, the context limit, cache-write pricing by cache length, the Cache health section and its Vitals lines (memory index, requests this turn), every width from 24 to 120 columns on the terminal and the desktop, and the `context_breakdown` text |
+| [`hooks/pane.test.tsx`](hooks/pane.test.tsx) | 30 tests: the section chips (hide, drag, a saved layout), the Cache health bar setting and the themes (kept, unknown ones dropped, every nested element painted), the limit estimator, drawing, opening and closing sections, folding the Vitals stats row (terminal and desktop), permission tallies, the context limit, cache-write pricing by cache length, the Cache health section and its Vitals line (memory index; requests this turn stay in Cache health), every width from 24 to 120 columns on the terminal and the desktop, and the `context_breakdown` text |
 | [`hooks/scan_test.py`](hooks/scan_test.py) | `python3 -I hooks/scan_test.py`: transcript reading — one-hour writes when a response has no split, the cap at the write, empty placeholder lines skipped, two responses in the same millisecond, rebuild labels |
 | [`types/index.d.ts`](types/index.d.ts) | the state contract |
 
