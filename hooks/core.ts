@@ -315,6 +315,11 @@ export const applyLayoutMessage = (l: Layout, data: unknown): Layout => {
 // Reader: the Blueprint Reader page's paper, ink and slate.
 export type Theme = {
   name: string
+  /** A dark strip under each desktop Button, for a theme whose light card the app's light ink would vanish on. */
+  pill?: string
+  /** The light ink, and its muted form, for text on the pill. */
+  pillInk?: string
+  pillMuted?: string
   bg: string
   card: string
   fg: string
@@ -334,7 +339,7 @@ export const THEMES: Record<string, Theme> = {
   },
   reader: {
     name: 'Reader',
-    bg: '#efe8db', card: '#f7f3ea', fg: '#2f2c28', muted: '#8b8375', border: '#d8cebc',
+    bg: '#efe8db', card: '#f7f3ea', pill: '#46545c', pillInk: '#ffffff', pillMuted: '#d6d0c4', fg: '#2f2c28', muted: '#8b8375', border: '#d8cebc',
     keys: {
       claude: '#46545c', suggestion: '#46545c', success: '#5b7a4a', warning: '#8a5a1f', error: '#a1463a',
       text: '#5e584f', merged: '#7a5e86', bashBorder: '#a1463a', planMode: '#4f7470', inactive: '#b3aa9a', permission: '#6a6f94',

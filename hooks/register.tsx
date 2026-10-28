@@ -92,9 +92,6 @@ const SETTINGS_OPEN = 'settings-open'
 const layout = atom({ plugin: 'session-watcher', key: 'layout' } as const, defaultLayout() as Layout)
 const LAYOUT = 'layout'
 const CHIPS = 'section-chips'
-const OPTIONS = 'settings-options'
-// A pressable title drawn on its own surface: press:sec:<section id> or press:task:<startedAt>.
-const PRESS = 'press:'
 // Every card, outer section or inner (a task, a sub-agent), is drawn alike: sections can be moved, so
 // no card may look like a special first one. The current task is marked by its "now" tag, not its border.
 const CARD = { flexDirection: 'column', borderStyle: 'single', borderDimColor: true, paddingX: 1 } as const
@@ -239,25 +236,10 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // The section chips post a tick or a move, the Settings choices a pick; the new layout is saved for later sessions.
+  // The section chips post a tick or a move; the new layout is saved for later sessions.
   on('ui.message', async ($, e, next) => {
-    // The Settings choices post the id of the row pressed: the Cache health bar flag or a theme.
-    const el = String(e.element)
-    if (el.startsWith(PRESS)) {
-      const [kind, id] = [el.slice(PRESS.length, el.indexOf(':', PRESS.length)), el.slice(el.indexOf(':', PRESS.length) + 1)]
-      if (kind === 'sec') await update($, sections, l => (l.includes(id) ? l.filter(x => x !== id) : [...l, id]))
-      else if (kind === 'task') {
-        const at = Number(id)
-        await update($, taskToggles, l => (l.includes(at) ? l.filter(x => x !== at) : [...l, at].slice(-60)))
-      }
-      return {}
-    }
-    const isOption = el.startsWith(OPTIONS)
-    if (e.element !== CHIPS && !isOption) return next(e)
-    const pick = (e.data as { pick?: unknown } | undefined)?.pick
-    if (isOption && typeof pick !== 'string') return {}
-    const msg = isOption ? (pick === 'cacheBar' ? { flag: 'cacheBar' } : { theme: pick === 'app' ? null : pick }) : e.data
-    const l = await update($, layout, l0 => applyLayoutMessage(cleanLayout(l0), msg))
+    if (e.element !== CHIPS) return next(e)
+    const l = await update($, layout, l0 => applyLayoutMessage(cleanLayout(l0), e.data))
     await $.store.set(LAYOUT, l).catch(() => undefined)
     return {}
   })
@@ -535,6 +517,7 @@ export const register: Register = on => {
   // ---------------------------------------------------------------- drawing
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    try {
     const ui = $.ui.resolve(e)
     const { Box, Text, Button } = ui
     // The terminal draws bars as characters; the other surfaces have a proportional font, so an SVG.
@@ -680,21 +663,19 @@ export const register: Register = on => {
 
     const isOpen = (id: string) => open.includes(id)
     const flip = (id: string) => update($, sections, l => (l.includes(id) ? l.filter(x => x !== id) : [...l, id]))
-    // A clickable title. Under a theme on a surface with Clients it is drawn on its own surface in
-    // the theme's colours (a Button would keep the app's ink); otherwise it is a plain Button.
+    // A clickable title: always the surface's own Button, in its normal font. A desktop draws a Button's
+    // text in the app's ink, which a theme cannot change, so a theme with a light card (Reader) sets each
+    // one on a dark strip (its pill) that the app's light ink shows against.
     type R = { text: string; color?: string; dim?: boolean; bold?: boolean; size?: string }
-    // width: a fixed width for a short control (the cog); titles fill the row they sit in.
-    const pressable = (key: string, runs: R[], onPress: () => void, width?: number) => {
-      const Client = 'Client' in ui ? ui.Client : undefined
-      if (theme && Client) {
-        const ink = (r: R) => (r.color ? (theme.keys[r.color] ?? r.color) : r.dim ? theme.muted : theme.fg)
-        return <Client key={key} {...(width ? { width } : {})} module="./press.tsx" props={{ bg: theme.card, runs: runs.map(r => ({ text: r.text, color: ink(r), ...(r.bold ? { bold: true } : {}) })) }} height={1} />
-      }
-      return (
+    const pill = e.surface === 'desktop' ? theme?.pill : undefined
+    const pressable = (key: string, runs: R[], onPress: () => void) => {
+      const button = (
         <Button key={key} plain onPress={onPress}>
-          {runs.map((r, i) => <Text key={`r${i}`} color={r.color} dimColor={r.dim} bold={r.bold} size={r.size as never}>{r.text}</Text>)}
+          {runs.map((r, i) => <Text key={`r${i}`} color={pill ? (r.dim ? theme?.pillMuted : theme?.pillInk) : r.color} dimColor={pill ? undefined : r.dim} bold={r.bold} size={r.size as never}>{r.text}</Text>)}
         </Button>
       )
+      // On a pill the text is light, whichever ink draws it: the theme's (if honoured) or the app's.
+      return pill ? <Box key={`${key}-pill`} backgroundColor={pill} paddingX={1}>{button}</Box> : button
     }
 
     // One collapsible section: a header row that opens and closes it, a one-line summary while closed.
@@ -704,7 +685,7 @@ export const register: Register = on => {
         <Box key={id} {...CARD} gap={o ? 1 : 0}>
           <Box key="head" flexDirection="row" gap={1} alignItems="center">
             <Box flexGrow={1} flexShrink={1} minWidth={0}>
-              {pressable(theme ? `${PRESS}sec:${id}` : `sec-${id}`, [{ text: o ? '▾ ' : '▸ ', dim: true }, { text: title, bold: true }], () => void flip(id))}
+              {pressable(`sec-${id}`, [{ text: o ? '▾ ' : '▸ ', dim: true }, { text: title, bold: true }], () => void flip(id))}
             </Box>
             {summary !== '' && (
               <Box flexShrink={1} minWidth={0}>
@@ -776,8 +757,7 @@ export const register: Register = on => {
     const Client = 'Client' in ui ? ui.Client : undefined
     const palette = theme ? { palette: { bg: theme.card, fg: theme.fg, muted: theme.muted, accent: theme.keys.claude ?? theme.fg } } : {}
     const themeChoices = [{ id: 'app', name: 'Original' }, ...Object.entries(THEMES).map(([id, t]) => ({ id, name: t.name }))]
-    const options = (key: string, items: { id: string; mark: string; label: string; isOn: boolean }[]) =>
-      Client ? <Client key={key} module="./options.tsx" props={{ items, ...palette }} height={items.length} /> : null
+    const Select = 'Select' in ui ? ui.Select : undefined
     const chips = Client ? (
       <Client key={CHIPS} module="./chips.tsx" props={{ items: chipItems, ...palette }} height={chipItems.length} />
     ) : (
@@ -800,7 +780,7 @@ export const register: Register = on => {
       <Box key="vitals" {...CARD} gap={1}>
         <Box key="title" flexDirection="row" flexWrap="wrap" columnGap={2} justifyContent="space-between">
           <Box flexGrow={1} flexShrink={1} minWidth={0}>
-          {pressable(theme ? `${PRESS}sec:${VITALS_FOLDED}` : 'sec-vitals', [
+          {pressable('sec-vitals', [
             { text: '● ', color: v.isRunning ? 'claude' : 'success', bold: true },
             { text: v.model ? modelName(v.model) : 'Session', bold: true },
             ...(v.effort ? [{ text: ` · ${v.effort}`, dim: true }] : []),
@@ -874,7 +854,7 @@ export const register: Register = on => {
               </Text>
             </Box>
           )}
-          {pressable(theme ? `${PRESS}sec:${SETTINGS_OPEN}` : 'settings', [{ text: '⚙', color: settingsOpen ? 'claude' : undefined, dim: !settingsOpen, size: 'title' }], () => void flip(SETTINGS_OPEN), 2)}
+          {pressable('settings', [{ text: '⚙', color: settingsOpen ? 'claude' : undefined, dim: !settingsOpen, size: 'title' }], () => void flip(SETTINGS_OPEN))}
         </Box>
         {settingsOpen && (
           <Box key="settings-body" flexDirection="column" gap={1}>
@@ -884,31 +864,22 @@ export const register: Register = on => {
               <Box key="secs" flexDirection="column" flexShrink={0} gap={1}>
                 {heading('sh', 'SECTIONS · TICK TO SHOW · DRAG TO MOVE')}
                 {chips}
-                {/* A desktop Button draws its label in the app's own ink, not the theme's, so only the box is
-                    the Button and the label is plain Text, as in the section list. */}
-                {options(`${OPTIONS}-cache`, [{ id: 'cacheBar', mark: lay.hideCacheBar ? '☐' : '☑', label: 'Cache health bar in this card', isOn: !lay.hideCacheBar }]) ?? <Box key="cache-bar-row" flexDirection="row">
-                  <Button key="cache-bar-flag" plain onPress={() => void setLayout({ flag: 'cacheBar' })}>
-                    <Text color={lay.hideCacheBar ? undefined : 'claude'} dimColor={lay.hideCacheBar}>{lay.hideCacheBar ? '☐' : '☑'}</Text>
-                  </Button>
-                  <Text dimColor={lay.hideCacheBar}>  Cache health bar in this card</Text>
-                </Box>}
+                {pressable('cache-bar-flag', [
+                  { text: lay.hideCacheBar ? '☐' : '☑', color: lay.hideCacheBar ? undefined : 'claude', dim: lay.hideCacheBar },
+                  { text: '  Cache health bar in this card', dim: lay.hideCacheBar },
+                ], () => void setLayout({ flag: 'cacheBar' }))}
               </Box>
-              <Box key="themes" flexDirection="column" flexShrink={0}>
+              <Box key="themes" flexDirection="column" flexShrink={0} gap={1}>
                 {heading('th', 'THEME')}
-                {options(`${OPTIONS}-theme`, themeChoices.map(o => {
-                  const isOn = (lay.theme ?? 'app') === o.id
-                  return { id: o.id, mark: isOn ? '◉' : '○', label: o.name, isOn }
-                })) ?? [{ id: null as string | null, name: 'Original' }, ...Object.entries(THEMES).map(([id, t]) => ({ id: id as string | null, name: t.name }))].map(o => {
-                  const isOn = (lay.theme ?? null) === o.id
-                  return (
-                    <Box key={`theme-row-${o.id ?? 'app'}`} flexDirection="row">
-                      <Button key={`theme-${o.id ?? 'app'}`} plain onPress={() => void setLayout({ theme: o.id })}>
-                        <Text color={isOn ? 'claude' : undefined} dimColor={!isOn}>{isOn ? '◉' : '○'}</Text>
-                      </Button>
-                      <Text bold={isOn} dimColor={!isOn}>{`  ${o.name}`}</Text>
-                    </Box>
-                  )
-                })}
+                {/* A dropdown where the surface has one: the surface draws it, so it reads in any theme. */}
+                {Select ? (
+                  <Select key="theme" options={themeChoices.map(o => ({ value: o.id, label: o.name }))} value={lay.theme ?? 'app'} onSelect={v => void setLayout({ theme: v === 'app' ? null : v })} />
+                ) : (
+                  themeChoices.map(o => {
+                    const isOn = (lay.theme ?? 'app') === o.id
+                    return pressable(`theme-${o.id}`, [{ text: isOn ? '◉' : '○', color: isOn ? 'claude' : undefined, dim: !isOn }, { text: `  ${o.name}`, bold: isOn, dim: !isOn }], () => void setLayout({ theme: o.id === 'app' ? null : o.id }))
+                  })
+                )}
               </Box>
             </Box>
           </Box>
@@ -1056,7 +1027,7 @@ export const register: Register = on => {
         <Box key={`task-${t.startedAt}`} {...CARD} gap={o ? 1 : 0}>
           <Box key="head" flexDirection="row" gap={1} alignItems="center">
             <Box flexGrow={1} flexShrink={1} minWidth={0}>
-              {pressable(theme ? `${PRESS}task:${t.startedAt}` : `open-${t.startedAt}`, [
+              {pressable(`open-${t.startedAt}`, [
                 { text: o ? '▾ ' : '▸ ', dim: true },
                 { text: t.label, bold: true, color: isNow ? 'claude' : undefined },
                 ...(isNow ? [{ text: '  now', dim: true }] : []),
@@ -1310,8 +1281,10 @@ export const register: Register = on => {
       log: () => section('log', 'Activity', errorsNow > 0 ? `${lines.length} events · ${errorsNow} errors` : `${lines.length} events`, logBody),
     }
 
+    // Under a theme the pane's own background is the theme's, with a margin around the cards, and it
+    // fills the pane so no app colour shows around them.
     const tree = (
-      <Box flexDirection="column" gap={1}>
+      <Box flexDirection="column" gap={1} {...(theme ? { padding: 1, flexGrow: 1 } : {})}>
         {vitalsCard}
         {lay.order.filter(id => !lay.hidden.includes(id)).map(id => byId[id]?.())}
         <Box key="actions" flexDirection="row" flexWrap="wrap" gap={1} alignItems="center">
@@ -1332,5 +1305,10 @@ export const register: Register = on => {
       </Box>
     )
     return theme ? paint(tree, theme) : tree
+    } catch (err) {
+      // A drawing that throws would leave the pane blank; show the error instead.
+      const { Text } = $.ui.resolve(e)
+      return <Text color="red">Session Watcher could not draw: {String((err as Error)?.stack ?? err).slice(0, 600)}</Text>
+    }
   })
 }

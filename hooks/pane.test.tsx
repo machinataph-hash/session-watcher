@@ -1,6 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
 import Chips from './chips'
-import Options from './options'
 import { applyLayoutMessage, breakdownText, cleanLayout, defaultLayout, emptyLimitModel, estimateLimit, fromModel, paint, THEMES, stepLimitModel, usdOf, weighted } from './core'
 
 const pane = { title: '', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} } as const
@@ -289,19 +288,20 @@ for (const surface of ['terminal', 'desktop'] as const)
     expect(await ui.find({ type: 'Text', text: /SECTIONS · TICK/ })).toBeUndefined()
   })
 
-// The theme choices and the Cache health bar flag are drawn on their own surface; a press on a row picks it.
-test('desktop: a press on a theme row picks that theme, and it is saved', async ($, on) => {
+// The theme is a dropdown; the Cache health bar flag is a Button. Both picks are saved.
+test('desktop: the theme dropdown picks a theme, and the Cache health bar flag flips', async ($, on) => {
   mock.clock(on)
   mock.store(on)
   await start($, on)
   const ui = await mount($, 'desktop')
   await ui.press({ key: 'settings' })
-  // Rows: Original, Frostwerk, Reader.
-  await ui.pointer({ type: 'down', x: 4, y: 2, button: 'left', in: 'settings-options-theme' })
-  const on_ = async (key: string) => ((await ui.find({ key })) as any)?.props?.props?.items.filter((i: any) => i.isOn).map((i: any) => i.id)
-  expect(await on_('settings-options-theme')).toEqual(['reader'])
-  await ui.pointer({ type: 'down', x: 4, y: 0, button: 'left', in: 'settings-options-cache' })
-  expect(await on_('settings-options-cache')).toEqual([])
+  await ui.select({ key: 'theme', value: 'reader' })
+  expect(((await ui.find({ key: 'theme' })) as any)?.props?.value).toBe('reader')
+  expect(await ui.find({ type: 'Text', text: '☑' })).toBeDefined()
+  await ui.press({ key: 'cache-bar-flag' })
+  expect(await ui.find({ type: 'Text', text: '☐' })).toBeDefined()
+  await ui.select({ key: 'theme', value: 'app' })
+  expect(((await ui.find({ key: 'theme' })) as any)?.props?.value).toBe('app')
 })
 
 test('a stored layout is cleaned: unknown ids dropped, new sections added last', () => {
@@ -359,16 +359,6 @@ test('chips: in every theme, text is drawn in a colour unlike its background', (
     walk(n.props?.children, here, out)
   }
   for (const t of Object.values(THEMES)) {
-    const surface0 = { elements: { Box: el('Box'), Text: el('Text') }, state: null, setState() {}, onPointer() {}, post() {} }
-    const choices = [{ id: 'app', mark: '○', label: 'Original', isOn: false }, { id: 'reader', mark: '◉', label: 'Reader', isOn: true }]
-    const optTexts: { color: unknown; bg: unknown }[] = []
-    walk((Options as any)({ items: choices, palette: { bg: t.card, fg: t.fg, muted: t.muted, accent: t.keys.claude } }, surface0), undefined, optTexts)
-    expect(optTexts.length).toBe(4)
-    for (const x of optTexts) {
-      expect(typeof x.color).toBe('string')
-      expect(x.bg).toBe(t.card)
-      expect(x.color).not.toBe(x.bg)
-    }
     const surface = { elements: { Box: el('Box'), Text: el('Text') }, state: null, setState() {}, onPointer() {}, post() {} }
     const items = [{ id: 'a', title: 'A', isShown: true }, { id: 'b', title: 'B', isShown: false }]
     const tree = (Chips as any)({ items, palette: { bg: t.card, fg: t.fg, muted: t.muted, accent: t.keys.claude } }, surface)
@@ -384,41 +374,37 @@ test('chips: in every theme, text is drawn in a colour unlike its background', (
 })
 
 // The theme rule: in every theme, no text is drawn in its background's colour. A desktop Button keeps
-// the app's ink, so under a theme no Button may hold text; clickable titles are drawn on their own surface.
+// the app's light ink, so in a theme with a light card every Button that holds text sits on its dark pill.
 for (const id of Object.keys(THEMES))
-  test(`desktop, ${id}: no text in the background's colour, and no Button holds text`, async ($, on) => {
+  test(`desktop, ${id}: no text in the background's colour, and every Button reads`, async ($, on) => {
     const t = THEMES[id]!
     mock.clock(on)
     mock.store(on, { layout: { theme: id } })
     await start($, on)
     const ui = await mount($, 'desktop')
-    await ui.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: 'press:sec:settings-open' })
-    expect(await ui.find({ key: 'settings-options-theme' })).toBeDefined()
-    const bgs = [t.bg, t.card]
-    // Only labelled chrome Buttons (Copy CSV) remain, and they draw no Text of ours.
-    const buttons = await ui.findAll({ type: 'Button' })
-    for (const b of buttons) {
-      expect({ key: (b as any).key, label: typeof (b as any).props?.label, children: ((b as any).children ?? []).length })
-        .toEqual({ key: (b as any).key, label: 'string', children: 0 })
-    }
-    // A task header is pressable too, and the press reaches its handler.
-    const task = (await ui.findAll({ type: 'Client' })).map(c => String((c as any).key)).find(k => k.startsWith('press:task:'))
-    expect(task).toBeDefined()
-    await ui.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: task! })
+    await ui.press({ key: 'settings' })
+    expect(await ui.find({ key: 'theme' })).toBeDefined()
     for (const x of await ui.findAll({ type: 'Text' })) {
       const c = (x as any).props?.color
       expect(typeof c).toBe('string')
-      expect(bgs).not.toContain(c)
+      expect([t.bg, t.card]).not.toContain(c)
     }
-    for (const c of await ui.findAll({ type: 'Client' })) {
-      const p = (c as any).props?.props
-      const colours: string[] = [
-        ...(p.runs ?? []).map((r: any) => r.color),
-        ...(p.palette ? [p.palette.fg, p.palette.muted, p.palette.accent] : []),
-      ]
-      for (const col of colours) expect([p.bg ?? p.palette?.bg]).not.toContain(col)
-      expect(p.bg ?? p.palette?.bg).toBe(t.card)
+    const holding = (await ui.findAll({ type: 'Button' })).filter(b => ((b as any).children ?? []).length > 0)
+    expect(holding.length).toBeGreaterThan(3)
+    const pills = (await ui.findAll({ type: 'Box' })).filter(b => (b as any).props?.backgroundColor === t.pill && t.pill !== undefined)
+    expect(pills.length).toBe(t.pill ? holding.length : 0)
+    // The pills are dark against the card: the app's light ink shows on them.
+    const lum = (hex: string) => { const n = parseInt(hex.slice(1), 16); return (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255 }
+    if (t.pill) expect(lum(t.pill)).toBeLessThan(0.4)
+    // Text on a pill is light, so it reads on the pill however the Button draws it.
+    if (t.pill) for (const b of holding) for (const x of ((b as any).children ?? []) as any[]) {
+      if (x?.type === 'Text') expect(lum(x.props.color)).toBeGreaterThan(0.6)
     }
+    else expect(lum(t.card)).toBeLessThan(0.4)
+    // A task header is still a Button, and pressing it opens or closes the task.
+    const task = holding.map(b => String((b as any).key)).find(k => k.startsWith('open-'))
+    expect(task).toBeDefined()
+    await ui.press({ key: task! })
   })
 
 // Sections can be moved, so every card is drawn alike: one border style and colour, whatever its place.
