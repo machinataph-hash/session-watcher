@@ -691,11 +691,12 @@ export const register: Register = on => {
       )
     }
 
-    const statW = isWide ? Math.floor(inner / 4) : isNarrow ? inner : Math.floor(inner / 2)
-    // Three across (Cache health) take a third each, with the spare cells between them.
-    const stat3 = isNarrow ? inner : Math.max(1, Math.floor((inner - 4) / 3))
-    const stat = (key: string, label: string, value: string, opts: { color?: 'claude' | 'error' | 'warning' | 'success'; sub?: string; w?: number } = {}) => (
-      <Box key={key} flexDirection="column" width={opts.w ?? statW} flexGrow={1} flexShrink={0}>
+    // Shares of the row, not cell counts, so the columns reach the right edge on every surface.
+    const statW = isWide ? '25%' : isNarrow ? '100%' : '50%'
+    // Three across (Cache health) take a third each.
+    const stat3 = isNarrow ? '100%' : '33%'
+    const stat = (key: string, label: string, value: string, opts: { color?: 'claude' | 'error' | 'warning' | 'success'; sub?: string; w?: string } = {}) => (
+      <Box key={key} flexDirection="column" width={opts.w ?? statW} flexShrink={0}>
         {heading('l', label)}
         <Text size="heading" weight="semibold" bold tabular color={opts.color} wrap="truncate-end">
           {value}
