@@ -289,22 +289,26 @@ for (const surface of ['terminal', 'desktop'] as const)
   })
 
 // The theme is a dropdown; the Cache health bar flag is a Button. Both picks are saved.
-test('desktop: a theme checkbox picks a theme, and the Cache health bar flag flips', async ($, on) => {
+test('desktop: a theme tick picks a theme, and the Cache health bar flag flips', async ($, on) => {
   mock.clock(on)
   mock.store(on)
   await start($, on)
   const ui = await mount($, 'desktop')
   await ui.press({ key: 'settings' })
-  const ticked = async (key: string) => (((await ui.find({ key })) as any)?.children?.[0]?.children ?? []).join('') === '☑'
-  expect(await ticked('theme-app')).toBe(true)
-  await ui.press({ key: 'theme-reader' })
-  expect(await ticked('theme-reader')).toBe(true)
-  expect(await ticked('theme-app')).toBe(false)
-  expect(await ticked('cache-bar-flag')).toBe(true)
-  await ui.press({ key: 'cache-bar-flag' })
-  expect(await ticked('cache-bar-flag')).toBe(false)
-  await ui.press({ key: 'theme-app' })
-  expect(await ticked('theme-app')).toBe(true)
+  const items = async (key: string) => (((await ui.find({ key })) as any)?.props?.props?.items ?? []) as { id: string; isShown: boolean }[]
+  const on1 = async (key: string) => (await items(key)).filter(i => i.isShown).map(i => i.id)
+  const click = async (key: string, y: number) => {
+    await ui.pointer({ type: 'down', x: 4, y, button: 'left', in: key })
+    await ui.pointer({ type: 'up', x: 4, y, button: 'left', in: key })
+  }
+  expect(await on1('setting-ticks-theme')).toEqual(['theme:app'])
+  await click('setting-ticks-theme', 2)
+  expect(await on1('setting-ticks-theme')).toEqual(['theme:reader'])
+  expect(await on1('setting-ticks-flag')).toEqual(['cacheBar'])
+  await click('setting-ticks-flag', 0)
+  expect(await on1('setting-ticks-flag')).toEqual([])
+  await click('setting-ticks-theme', 0)
+  expect(await on1('setting-ticks-theme')).toEqual(['theme:app'])
 })
 
 test('a stored layout is cleaned: unknown ids dropped, new sections added last', () => {
@@ -385,21 +389,27 @@ for (const id of Object.keys(THEMES))
     mock.store(on, { layout: { theme: id } })
     await start($, on)
     const ui = await mount($, 'desktop')
-    await ui.press({ key: 'settings' })
-    expect(await ui.find({ key: `theme-${id}` })).toBeDefined()
+    await ui.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: 'press:settings' })
+    expect(await ui.find({ key: 'setting-ticks-theme' })).toBeDefined()
     for (const x of await ui.findAll({ type: 'Text' })) {
       const c = (x as any).props?.color
       expect(typeof c).toBe('string')
       expect([t.bg, t.card]).not.toContain(c)
     }
+    // Every clickable title is its own one-line surface in theme colours; no Button holds text.
     const holding = (await ui.findAll({ type: 'Button' })).filter(b => ((b as any).children ?? []).length > 0)
-    expect(holding.length).toBeGreaterThan(3)
-    for (const b of holding) for (const x of ((b as any).children ?? []) as any[]) expect(x?.type).toBe('Text')
+    expect(holding).toHaveLength(0)
+    const titles = (await ui.findAll({ type: 'Client' })).filter(c => String((c as any).key).startsWith('press:'))
+    expect(titles.length).toBeGreaterThan(3)
+    for (const c of titles) for (const r of (c as any).props.props.runs) expect([t.bg, t.card]).not.toContain(r.color)
     expect((await ui.findAll({ type: 'Box' })).filter(b => (b as any).props?.backgroundColor !== undefined && (b as any).props?.backgroundColor !== t.card)).toHaveLength(0)
-    // A task header is still a Button, and pressing it opens or closes the task.
-    const task = holding.map(b => String((b as any).key)).find(k => k.startsWith('open-'))
+    // A task header still opens and closes the task, and a section title still folds its section.
+    const task = titles.map(c => String((c as any).key)).find(k => k.startsWith('press:open-'))
     expect(task).toBeDefined()
-    await ui.press({ key: task! })
+    await ui.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: task! })
+    expect(await ui.find({ key: 'press:sec-tasks' })).toBeDefined()
+    await ui.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'press:sec-tasks' })
+    expect(await ui.find({ key: task! })).toBeUndefined()
   })
 
 // Sections can be moved, so every card is drawn alike: one border style and colour, whatever its place.

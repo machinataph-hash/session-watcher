@@ -4,7 +4,8 @@
 import type { ClientModule } from 'claude-code'
 
 type Item = { id: string; title: string; isShown: boolean }
-type Props = { items: Item[]; palette?: { bg: string; fg: string; muted: string; accent: string } }
+// isFixed: a plain tick list (themes, a flag): no drag and no handle; a click posts { pick: id }.
+type Props = { items: Item[]; isFixed?: boolean; palette?: { bg: string; fg: string; muted: string; accent: string } }
 // isHeld: the button is down. After the drop the row stays drawn where it was dropped, so the list
 // does not jump back for the frames before the new order arrives; with it, from equals over again.
 type Drag = { from: number; over: number; isHeld: boolean }
@@ -29,6 +30,10 @@ const Chips: ClientModule<Props, State> = (props, surface) => {
       const y = Math.floor(p.y)
       const item = items[y]
       if (!item) return
+      if (props.isFixed) {
+        surface.post({ pick: item.id })
+        return
+      }
       // A click anywhere on the row ticks it; a drag to another row moves it. The release decides.
       set({ from: y, over: y, isHeld: true })
     } else if (p.type === 'move' && live?.isHeld) {
@@ -62,7 +67,7 @@ const Chips: ClientModule<Props, State> = (props, surface) => {
             <Text color={it.isShown ? (pal?.accent ?? 'claude') : pal?.muted} dimColor={!pal && !it.isShown}>
               {it.isShown ? '☑' : '☐'}
             </Text>
-            <Text color={pal?.muted} dimColor={!pal}>{'  ⠿ '}</Text>
+            <Text color={pal?.muted} dimColor={!pal}>{props.isFixed ? '  ' : '  ⠿ '}</Text>
             <Text bold={isDragged} color={isDragged ? (pal?.accent ?? 'claude') : pal ? (it.isShown ? pal.fg : pal.muted) : undefined} dimColor={!pal && !it.isShown && !isDragged} wrap="truncate-end">
               {it.title}
             </Text>

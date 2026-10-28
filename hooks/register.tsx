@@ -92,6 +92,11 @@ const SETTINGS_OPEN = 'settings-open'
 const layout = atom({ plugin: 'session-watcher', key: 'layout' } as const, defaultLayout() as Layout)
 const LAYOUT = 'layout'
 const CHIPS = 'section-chips'
+// The theme list and the Cache health bar flag: plain tick lists on the same kind of surface.
+const TICKS = 'setting-ticks'
+// Clickable titles drawn on their own surface under a theme; a press posts and runs the title's action.
+const PRESS = 'press:'
+const pressActions = new Map<string, () => void>()
 // Every card, outer section or inner (a task, a sub-agent), is drawn alike: sections can be moved, so
 // no card may look like a special first one. The current task is marked by its "now" tag, not its border.
 const CARD = { flexDirection: 'column', borderStyle: 'single', borderDimColor: true, paddingX: 1 } as const
@@ -238,8 +243,16 @@ export const register: Register = on => {
 
   // The section chips post a tick or a move; the new layout is saved for later sessions.
   on('ui.message', async ($, e, next) => {
-    if (e.element !== CHIPS) return next(e)
-    const l = await update($, layout, l0 => applyLayoutMessage(cleanLayout(l0), e.data))
+    const el = String(e.element)
+    if (el.startsWith(PRESS)) {
+      pressActions.get(el)?.()
+      return {}
+    }
+    const isTicks = el.startsWith(TICKS)
+    if (e.element !== CHIPS && !isTicks) return next(e)
+    const pick = (e.data as { pick?: unknown } | null)?.pick
+    const msg = e.element === CHIPS ? e.data : pick === 'cacheBar' ? { flag: 'cacheBar' } : typeof pick === 'string' && pick.startsWith('theme:') ? { theme: pick === 'theme:app' ? null : pick.slice(6) } : null
+    const l = await update($, layout, l0 => applyLayoutMessage(cleanLayout(l0), msg))
     await $.store.set(LAYOUT, l).catch(() => undefined)
     return {}
   })
@@ -663,14 +676,22 @@ export const register: Register = on => {
 
     const isOpen = (id: string) => open.includes(id)
     const flip = (id: string) => update($, sections, l => (l.includes(id) ? l.filter(x => x !== id) : [...l, id]))
-    // A clickable title: the surface's own Button, in its normal font, its text in the theme's colours.
     type R = { text: string; color?: string; dim?: boolean; bold?: boolean; size?: string }
-    // A plain Button whose text is the mod's own Text, so it takes the theme's colours like all other text.
-    const pressable = (key: string, runs: R[], onPress: () => void) => (
-      <Button key={key} plain onPress={onPress}>
-        {runs.map((r, i) => <Text key={`r${i}`} color={r.color} dimColor={r.dim} bold={r.bold} size={r.size as never}>{r.text}</Text>)}
-      </Button>
-    )
+    // A clickable title. With no theme, the surface's own Button. Under a theme on a surface with Clients,
+    // its own one-line surface in the theme's colours, since a desktop Button keeps the app's ink.
+    const Client = 'Client' in ui ? ui.Client : undefined
+    const pressable = (key: string, runs: R[], onPress: () => void) => {
+      if (theme && Client) {
+        pressActions.set(`${PRESS}${key}`, onPress)
+        const ink = (r: R) => (r.color ? theme.keys[r.color] ?? r.color : r.dim ? theme.muted : theme.fg)
+        return <Client key={`${PRESS}${key}`} module="./press.tsx" props={{ bg: theme.card, runs: runs.map(r => ({ text: r.text, color: ink(r), ...(r.bold ? { bold: true } : {}) })) }} height={1} />
+      }
+      return (
+        <Button key={key} plain onPress={onPress}>
+          {runs.map((r, i) => <Text key={`r${i}`} color={r.color} dimColor={r.dim} bold={r.bold} size={r.size as never}>{r.text}</Text>)}
+        </Button>
+      )
+    }
 
     // One collapsible section: a header row that opens and closes it, a one-line summary while closed.
     const section = (id: string, title: string, summary: string, body: () => unknown) => {
@@ -748,7 +769,6 @@ export const register: Register = on => {
     const titleOf = (id: string) => SECTIONS.find(x => x.id === id)?.title ?? id
     const chipItems = lay.order.map(id => ({ id, title: titleOf(id), isShown: !lay.hidden.includes(id) }))
     // Dragging needs a Client; a surface without one (mobile) moves a section up a place by its arrow.
-    const Client = 'Client' in ui ? ui.Client : undefined
     const palette = theme ? { palette: { bg: theme.card, fg: theme.fg, muted: theme.muted, accent: theme.keys.claude ?? theme.fg } } : {}
     const themeChoices = [{ id: 'app', name: 'Original' }, ...Object.entries(THEMES).map(([id, t]) => ({ id, name: t.name }))]
     const chips = Client ? (
@@ -859,19 +879,27 @@ export const register: Register = on => {
               <Box key="secs" flexDirection="column" flexShrink={0} gap={1}>
                 {heading('sh', 'SECTIONS · TICK TO SHOW · DRAG TO MOVE')}
                 {chips}
-                {pressable('cache-bar-flag', [
-                  { text: lay.hideCacheBar ? '☐' : '☑', color: lay.hideCacheBar ? undefined : 'claude', dim: lay.hideCacheBar },
-                  { text: '  Cache health bar in this card', dim: lay.hideCacheBar },
-                ], () => void setLayout({ flag: 'cacheBar' }))}
+                {Client ? (
+                  <Client key={`${TICKS}-flag`} module="./chips.tsx" props={{ isFixed: true, items: [{ id: 'cacheBar', title: 'Cache health bar in this card', isShown: !lay.hideCacheBar }], ...palette }} height={1} />
+                ) : (
+                  pressable('cache-bar-flag', [
+                    { text: lay.hideCacheBar ? '☐' : '☑', color: lay.hideCacheBar ? undefined : 'claude', dim: lay.hideCacheBar },
+                    { text: '  Cache health bar in this card', dim: lay.hideCacheBar },
+                  ], () => void setLayout({ flag: 'cacheBar' }))
+                )}
               </Box>
               <Box key="themes" flexDirection="column" flexShrink={0} gap={1}>
                 {heading('th', 'THEME')}
-                <Box key="theme-list" flexDirection="column">
-                  {themeChoices.map(o => {
-                    const isOn = (lay.theme ?? 'app') === o.id
-                    return pressable(`theme-${o.id}`, [{ text: isOn ? '☑' : '☐', dim: !isOn }, { text: ` ${o.name}`, bold: isOn, dim: !isOn }], () => void setLayout({ theme: o.id === 'app' ? null : o.id }))
-                  })}
-                </Box>
+                {Client ? (
+                  <Client key={`${TICKS}-theme`} module="./chips.tsx" props={{ isFixed: true, items: themeChoices.map(o => ({ id: `theme:${o.id}`, title: o.name, isShown: (lay.theme ?? 'app') === o.id })), ...palette }} height={themeChoices.length} />
+                ) : (
+                  <Box key="theme-list" flexDirection="column">
+                    {themeChoices.map(o => {
+                      const isOn = (lay.theme ?? 'app') === o.id
+                      return pressable(`theme-${o.id}`, [{ text: isOn ? '☑' : '☐', dim: !isOn }, { text: ` ${o.name}`, bold: isOn, dim: !isOn }], () => void setLayout({ theme: o.id === 'app' ? null : o.id }))
+                    })}
+                  </Box>
+                )}
               </Box>
             </Box>
           </Box>
