@@ -878,7 +878,8 @@ export const register: Register = on => {
         </Box>
         {settingsOpen && (
           <Box key="settings-body" flexDirection="column" gap={1}>
-            <Text key="sep" dimColor wrap="truncate-end">{'─'.repeat(inner)}</Text>
+            {/* Longer than any pane and clipped to the card's width, so it spans the card however wide it is. */}
+            <Text key="sep" dimColor wrap="truncate-end">{'─'.repeat(Math.max(inner, 600))}</Text>
             <Box key="cols" flexDirection="row" flexWrap="wrap" columnGap={4} rowGap={1}>
               <Box key="secs" flexDirection="column" flexShrink={0} gap={1}>
                 {heading('sh', 'SECTIONS · TICK TO SHOW · DRAG TO MOVE')}
