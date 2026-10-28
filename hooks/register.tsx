@@ -743,7 +743,7 @@ export const register: Register = on => {
     // Dragging needs a Client; a surface without one (mobile) moves a section up a place by its arrow.
     const Client = 'Client' in ui ? ui.Client : undefined
     const chips = Client ? (
-      <Client key={CHIPS} module="./chips.tsx" props={{ items: chipItems, ...(theme ? { palette: { fg: theme.fg, muted: theme.muted, accent: theme.keys.claude ?? theme.fg } } : {}) }} height={chipItems.length} />
+      <Client key={CHIPS} module="./chips.tsx" props={{ items: chipItems, ...(theme ? { palette: { bg: theme.card, fg: theme.fg, muted: theme.muted, accent: theme.keys.claude ?? theme.fg } } : {}) }} height={chipItems.length} />
     ) : (
       <Box key="chips" flexDirection="column">
         {chipItems.map((it, i) => (

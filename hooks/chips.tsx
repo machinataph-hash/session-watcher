@@ -4,7 +4,7 @@
 import type { ClientModule } from 'claude-code'
 
 type Item = { id: string; title: string; isShown: boolean }
-type Props = { items: Item[]; palette?: { fg: string; muted: string; accent: string } }
+type Props = { items: Item[]; palette?: { bg: string; fg: string; muted: string; accent: string } }
 // isHeld: the button is down. After the drop the row stays drawn where it was dropped, so the list
 // does not jump back for the frames before the new order arrives; with it, from equals over again.
 type Drag = { from: number; over: number; isHeld: boolean }
@@ -50,8 +50,10 @@ const Chips: ClientModule<Props, State> = (props, surface) => {
     const rest = items.filter((_, i) => i !== drag.from)
     shown = [...rest.slice(0, drag.over), items[drag.from] as Item, ...rest.slice(drag.over)]
   }
+  // A Client draws on its own surface, which does not take the theme's card colour: set it here, or the
+  // theme's ink lands on the app's own background.
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" backgroundColor={pal?.bg}>
       {shown.map(it => {
         const isDragged = drag !== null && drag.isHeld && items[drag.from]?.id === it.id
         return (
@@ -59,7 +61,7 @@ const Chips: ClientModule<Props, State> = (props, surface) => {
             <Text color={it.isShown ? (pal?.accent ?? 'claude') : pal?.muted} dimColor={!pal && !it.isShown}>
               {it.isShown ? '☑' : '☐'}
             </Text>
-            <Text dimColor>{'  ⠿ '}</Text>
+            <Text color={pal?.muted} dimColor={!pal}>{'  ⠿ '}</Text>
             <Text bold={isDragged} color={isDragged ? (pal?.accent ?? 'claude') : pal ? (it.isShown ? pal.fg : pal.muted) : undefined} dimColor={!pal && !it.isShown && !isDragged} wrap="truncate-end">
               {it.title}
             </Text>

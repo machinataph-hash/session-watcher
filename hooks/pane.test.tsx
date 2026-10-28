@@ -1,4 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
+import Chips from './chips'
 import { applyLayoutMessage, breakdownText, cleanLayout, defaultLayout, emptyLimitModel, estimateLimit, fromModel, paint, THEMES, stepLimitModel, usdOf, weighted } from './core'
 
 const pane = { title: '', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} } as const
@@ -322,4 +323,29 @@ test('paint: reaches children kept in props, nested lists included', () => {
   const t = THEMES.reader!
   const out = paint({ type: 'Box', props: { children: [[{ type: 'Text', props: { children: 'x' } }]] } } as never, t) as any
   expect(out.props.children[0][0].props.color).toBe(t.fg)
+})
+
+// Every theme: the chips sit on the Vitals card, so they take its colour; each Text they draw has a colour, and none equals the background they sit on.
+test('chips: in every theme, text is drawn in a colour unlike its background', () => {
+  const el = (type: string) => (props: Record<string, unknown>) => ({ type, props })
+  const walk = (n: any, bg: string | undefined, out: { color: unknown; bg: unknown }[]) => {
+    if (Array.isArray(n)) return n.forEach(c => walk(c, bg, out))
+    if (!n || typeof n !== 'object') return
+    const here = (n.props?.backgroundColor as string | undefined) ?? bg
+    if (n.type === 'Text') out.push({ color: n.props?.color, bg: here })
+    walk(n.props?.children, here, out)
+  }
+  for (const t of Object.values(THEMES)) {
+    const surface = { elements: { Box: el('Box'), Text: el('Text') }, state: null, setState() {}, onPointer() {}, post() {} }
+    const items = [{ id: 'a', title: 'A', isShown: true }, { id: 'b', title: 'B', isShown: false }]
+    const tree = (Chips as any)({ items, palette: { bg: t.card, fg: t.fg, muted: t.muted, accent: t.keys.claude } }, surface)
+    const texts: { color: unknown; bg: unknown }[] = []
+    walk(tree, undefined, texts)
+    expect(texts.length).toBe(6)
+    for (const x of texts) {
+      expect(typeof x.color).toBe('string')
+      expect(x.bg).toBe(t.card)
+      expect(x.color).not.toBe(x.bg)
+    }
+  }
 })
