@@ -691,10 +691,10 @@ export const register: Register = on => {
       )
     }
 
-    // Shares of the row, not cell counts, so the columns reach the right edge on every surface.
-    const statW = isWide ? '25%' : isNarrow ? '100%' : '50%'
-    // Three across (Cache health) take a third each.
-    const stat3 = isNarrow ? '100%' : '33%'
+    // One row when wide: the columns spread edge to edge, the last one ending at the right edge.
+    // Narrower, they wrap as halves or full rows.
+    const statW = isWide ? undefined : isNarrow ? '100%' : '50%'
+    const stat3 = isNarrow ? '100%' : undefined
     const stat = (key: string, label: string, value: string, opts: { color?: 'claude' | 'error' | 'warning' | 'success'; sub?: string; w?: string } = {}) => (
       <Box key={key} flexDirection="column" width={opts.w ?? statW} flexShrink={0}>
         {heading('l', label)}
@@ -709,7 +709,7 @@ export const register: Register = on => {
       </Box>
     )
     const stats = (key: string, items: unknown[]) => (
-      <Box key={key} flexDirection="row" flexWrap="wrap" rowGap={1}>
+      <Box key={key} flexDirection="row" flexWrap={isWide ? 'nowrap' : 'wrap'} justifyContent={isWide ? 'space-between' : 'flex-start'} columnGap={2} rowGap={1}>
         {items as never}
       </Box>
     )
