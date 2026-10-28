@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
-import { applyLayoutMessage, breakdownText, cleanLayout, defaultLayout, emptyLimitModel, estimateLimit, fromModel, stepLimitModel, usdOf, weighted } from './core'
+import { applyLayoutMessage, breakdownText, cleanLayout, defaultLayout, emptyLimitModel, estimateLimit, fromModel, paint, THEMES, stepLimitModel, usdOf, weighted } from './core'
 
 const pane = { title: '', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} } as const
 const usage = { model: 'claude-opus-5-5', input_tokens: 1000, output_tokens: 2000, cache_read_input_tokens: 100000, cache_creation_input_tokens: 4000 }
@@ -163,8 +163,8 @@ test(`${surface}: the Vitals stats row folds away`, async ($, on) => {
   expect(await ui.find({ type: 'Text', text: /^RUNNING FOR$/ })).toBeDefined()
 })
 
-// More than 15 main-thread requests in one turn shows the Vitals line; sub-agent requests do not count.
-test('requests this turn past 15 show in Vitals', async ($, on) => {
+// Requests this turn are shown in Cache health only; Vitals carries no turn-count warning.
+test('requests this turn past 15 no longer warn in Vitals', async ($, on) => {
   mock.clock(on, { now: 1_000_000 })
   on('turn.step', async function* () {
     return { turnId: 't', index: 0, answer: '', toolUses: [], stopReason: 'tool_use', usage } as never
@@ -179,7 +179,7 @@ test('requests this turn past 15 show in Vitals', async ($, on) => {
   const ui = await mount($, 'terminal')
   expect(await ui.find({ type: 'Text', text: /requests this turn/ })).toBeUndefined()
   await step()
-  expect(await ui.find({ type: 'Text', text: /16 requests this turn \(over 15\)/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /requests this turn \(over/ })).toBeUndefined()
 })
 
 test('context_breakdown: categories largest first, MCP tokens summed per server, loaded and deferred apart', async () => {
@@ -298,4 +298,22 @@ test('a layout saved by an earlier session is used at start', async ($, on) => {
   const keys = (await ui.findAll({ type: 'Button' })).map(b => (b as { key?: string }).key).filter(x => x?.startsWith('sec-') && x !== 'sec-vitals')
   expect(keys.slice(0, 2)).toEqual(['sec-gate', 'sec-session'])
   expect(keys).not.toContain('sec-tasks')
+})
+
+test('layout: cache-bar flag and theme are kept, unknown themes dropped', () => {
+  let l = applyLayoutMessage(cleanLayout(undefined), { flag: 'cacheBar' })
+  expect(l.hideCacheBar).toBe(true)
+  l = applyLayoutMessage(l, { flag: 'cacheBar' })
+  expect(l.hideCacheBar).toBeFalsy()
+  l = applyLayoutMessage(l, { theme: 'reader' })
+  expect(cleanLayout(l).theme).toBe('reader')
+  expect(cleanLayout({ ...l, theme: 'nope' }).theme).toBeUndefined()
+  expect(applyLayoutMessage(l, { theme: null }).theme).toBeUndefined()
+})
+
+test('paint: root gets the theme background, plain text the theme ink', () => {
+  const t = THEMES.frostwerk!
+  const out = paint({ type: 'Box', props: {}, children: [{ type: 'Text', props: { dimColor: true }, children: ['x'] }] } as never, t) as any
+  expect(out.props.backgroundColor).toBe(t.bg)
+  expect(out.children[0].props.color).toBe(t.muted)
 })

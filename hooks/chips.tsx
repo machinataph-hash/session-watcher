@@ -4,7 +4,7 @@
 import type { ClientModule } from 'claude-code'
 
 type Item = { id: string; title: string; isShown: boolean }
-type Props = { items: Item[] }
+type Props = { items: Item[]; palette?: { fg: string; muted: string; accent: string } }
 // isHeld: the button is down. After the drop the row stays drawn where it was dropped, so the list
 // does not jump back for the frames before the new order arrives; with it, from equals over again.
 type Drag = { from: number; over: number; isHeld: boolean }
@@ -17,6 +17,7 @@ let live: Drag | null = null
 const Chips: ClientModule<Props, State> = (props, surface) => {
   const { Box, Text } = surface.elements
   const items = props.items
+  const pal = props.palette
   const drag = surface.state ?? null
   const clamp = (y: number) => Math.max(0, Math.min(items.length - 1, Math.floor(y)))
   const set = (d: Drag | null) => {
@@ -55,11 +56,11 @@ const Chips: ClientModule<Props, State> = (props, surface) => {
         const isDragged = drag !== null && drag.isHeld && items[drag.from]?.id === it.id
         return (
           <Box key={it.id} flexDirection="row" height={1}>
-            <Text color={it.isShown ? 'claude' : undefined} dimColor={!it.isShown}>
+            <Text color={it.isShown ? (pal?.accent ?? 'claude') : pal?.muted} dimColor={!pal && !it.isShown}>
               {it.isShown ? '☑' : '☐'}
             </Text>
             <Text dimColor>{'  ⠿ '}</Text>
-            <Text bold={isDragged} color={isDragged ? 'claude' : undefined} dimColor={!it.isShown && !isDragged} wrap="truncate-end">
+            <Text bold={isDragged} color={isDragged ? (pal?.accent ?? 'claude') : pal ? (it.isShown ? pal.fg : pal.muted) : undefined} dimColor={!pal && !it.isShown && !isDragged} wrap="truncate-end">
               {it.title}
             </Text>
           </Box>

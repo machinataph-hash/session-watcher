@@ -15,6 +15,8 @@ import {
   empty,
   emptyGate,
   SECTIONS,
+  THEMES,
+  paint,
   applyLayoutMessage,
   cleanLayout,
   defaultLayout,
@@ -566,9 +568,11 @@ export const register: Register = on => {
     )
 
     type BarColor = 'claude' | 'suggestion' | 'success' | 'warning' | 'error' | 'text' | 'merged' | 'bashBorder' | 'planMode' | 'inactive' | 'permission'
+    const theme = lay.theme ? THEMES[lay.theme] : undefined
     const HEX: Record<BarColor, string> = {
       claude: '#d4683f', suggestion: '#4f8fe0', success: '#2fa84f', warning: '#e09b2d', error: '#d64545',
       text: '#6b6b6b', merged: '#8e5bd6', bashBorder: '#e0569f', planMode: '#23968a', inactive: '#a8a8a8', permission: '#7c83f2',
+      ...(theme?.keys ?? {}),
     }
     const KINDS = [
       { field: 'input', name: 'input', cost: (u: Usage) => u.input, color: 'success' },
@@ -687,8 +691,10 @@ export const register: Register = on => {
     }
 
     const statW = isWide ? Math.floor(inner / 4) : isNarrow ? inner : Math.floor(inner / 2)
-    const stat = (key: string, label: string, value: string, opts: { color?: 'claude' | 'error' | 'warning' | 'success'; sub?: string } = {}) => (
-      <Box key={key} flexDirection="column" width={statW} flexShrink={0}>
+    // Three across (Cache health) take a third each, with the spare cells between them.
+    const stat3 = isNarrow ? inner : Math.max(1, Math.floor((inner - 4) / 3))
+    const stat = (key: string, label: string, value: string, opts: { color?: 'claude' | 'error' | 'warning' | 'success'; sub?: string; w?: number } = {}) => (
+      <Box key={key} flexDirection="column" width={opts.w ?? statW} flexShrink={0}>
         {heading('l', label)}
         <Text size="heading" weight="semibold" bold tabular color={opts.color} wrap="truncate-end">
           {value}
@@ -723,19 +729,19 @@ export const register: Register = on => {
     const memWord = memColor === 'error' ? 'red' : memColor === 'warning' ? 'orange' : 'green'
     const cacheWarnings = [
       ...(ch && ch.memoryChars !== null && ch.memoryChars > MEMORY_MAX ? [`memory index ${k(ch.memoryChars)} chars (target ${MEMORY_MAX.toLocaleString('en-US')})`] : []),
-      ...(turnReqs > TURN_MAX ? [`${turnReqs} requests this turn (over ${TURN_MAX})`] : []),
     ]
     // The title folds away the stats row (cost, running for, active, requests); Session totals keeps cost and requests.
     const vitalsOpen = !isOpen(VITALS_FOLDED)
     const settingsOpen = isOpen(SETTINGS_OPEN)
     // The warning line takes the memory index's colour when that is what is over; else orange.
     const warnColor: BarColor = memColor === 'error' || memColor === 'warning' ? memColor : 'warning'
+    const setLayout = (msg: unknown) => update($, layout, l => applyLayoutMessage(cleanLayout(l), msg)).then(l => $.store.set(LAYOUT, l)).catch(() => undefined)
     const titleOf = (id: string) => SECTIONS.find(x => x.id === id)?.title ?? id
     const chipItems = lay.order.map(id => ({ id, title: titleOf(id), isShown: !lay.hidden.includes(id) }))
     // Dragging needs a Client; a surface without one (mobile) moves a section up a place by its arrow.
     const Client = 'Client' in ui ? ui.Client : undefined
     const chips = Client ? (
-      <Client key={CHIPS} module="./chips.tsx" props={{ items: chipItems }} height={chipItems.length} />
+      <Client key={CHIPS} module="./chips.tsx" props={{ items: chipItems, ...(theme ? { palette: { fg: theme.fg, muted: theme.muted, accent: theme.keys.claude ?? theme.fg } } : {}) }} height={chipItems.length} />
     ) : (
       <Box key="chips" flexDirection="column">
         {chipItems.map((it, i) => (
@@ -758,7 +764,7 @@ export const register: Register = on => {
           <Box flexGrow={1} flexShrink={1} minWidth={0}>
           <Button key="sec-vitals" plain onPress={() => void flip(VITALS_FOLDED)}>
             <Text bold wrap="truncate-end">
-              <Text color={v.isRunning ? 'claude' : 'success'}>{v.isRunning ? '● ' : '○ '}</Text>
+              <Text color={v.isRunning ? 'claude' : 'success'}>● </Text>
               {v.model ? modelName(v.model) : 'Session'}
               {v.effort ? <Text dimColor>{` · ${v.effort}`}</Text> : ''}
               {v.mode ? <Text dimColor>{` · ${v.mode}`}</Text> : ''}
@@ -797,13 +803,30 @@ export const register: Register = on => {
                     <Text dimColor wrap="truncate-end">{name}</Text>
                   </Box>
                   <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                    {strip('b', [{ value: (l.est ?? l.pct) / 100, color: c }], { track: true, cells: inner - (isNarrow ? 8 : 13) - 9 - (isNarrow ? 0 : 11) - 3 })}
+                    {strip('b', [{ value: (l.est ?? l.pct) / 100, color: c }], { track: true, cells: Math.max(4, inner - (isNarrow ? 8 : 13) - 9 - (isNarrow ? 0 : 11) - 3) })}
                   </Box>
-                  {cell('p', 8, n(l.est != null ? `≈${l.est.toFixed(2)}%` : `${Math.round(l.pct)}%`, { bold: true }))}
+                  {cell('p', 8, n(l.est != null ? `${l.est.toFixed(2)}%` : `${Math.round(l.pct)}%`, { bold: true }))}
                   {!isNarrow && cell('r', 10, <Text dimColor tabular size="footnote" wrap="truncate-end">{l.resetsAt ? `↻ ${untilReset(Math.max(0, l.resetsAt - now))}` : ''}</Text>)}
                 </Box>
               )
             })}
+          </Box>
+        )}
+        {!lay.hideCacheBar && ch && ch.memoryChars !== null && (
+          <Box key="cache-bar" flexDirection="column">
+            <Box key="row" flexDirection="row" gap={1} alignItems="center">
+              <Box width={isNarrow ? 8 : 13} flexShrink={0}>
+                <Text dimColor wrap="truncate-end">Cache health</Text>
+              </Box>
+              <Box flexGrow={1} flexShrink={1} minWidth={0}>
+                {strip('b', [{ value: Math.min(1, ch.memoryChars / MEMORY_BAR), color: memColor }], { track: true, cells: Math.max(4, inner - (isNarrow ? 8 : 13) - 9 - (isNarrow ? 0 : 11) - 3) })}
+              </Box>
+              {cell('p', 8, <Text tabular size="footnote" bold weight="semibold" color={memColor}>{memWord}</Text>)}
+              {!isNarrow && cell('r', 10, <Text dimColor tabular size="footnote" wrap="truncate-end">{k(ch.memoryChars)} chars</Text>)}
+            </Box>
+            <Text key="why" size="footnote" dimColor wrap="wrap">
+              {`Memory index loaded into every request: ${ch.memoryChars.toLocaleString('en-US')} of ${MEMORY_BAR.toLocaleString('en-US')} chars. Green to ${MEMORY_MAX.toLocaleString('en-US')} (target), orange to ${MEMORY_RED.toLocaleString('en-US')}, red past it. Start ${k(ch.first)} · ${ch.rebuildCount} rebuild${ch.rebuildCount === 1 ? '' : 's'}.`}
+            </Text>
           </Box>
         )}
         <Box key="foot" flexDirection="row" gap={1} alignItems="flex-end" justifyContent="flex-end">
@@ -816,15 +839,36 @@ export const register: Register = on => {
             </Box>
           )}
           <Button key="settings" plain onPress={() => void flip(SETTINGS_OPEN)}>
-            <Text color={settingsOpen ? 'claude' : undefined} dimColor={!settingsOpen} size="footnote">
+            <Text color={settingsOpen ? 'claude' : undefined} dimColor={!settingsOpen} size="title">
               ⚙
             </Text>
           </Button>
         </Box>
         {settingsOpen && (
           <Box key="settings-body" flexDirection="column" gap={1}>
-            {heading('sh', 'SECTIONS · TICK TO SHOW · DRAG TO MOVE')}
-            {chips}
+            <Text key="sep" dimColor wrap="truncate-end">{'─'.repeat(inner)}</Text>
+            <Box key="cols" flexDirection="row" flexWrap="wrap" columnGap={4} rowGap={1}>
+              <Box key="secs" flexDirection="column" flexShrink={0} gap={1}>
+                {heading('sh', 'SECTIONS · TICK TO SHOW · DRAG TO MOVE')}
+                {chips}
+                <Button key="cache-bar-flag" plain onPress={() => void setLayout({ flag: 'cacheBar' })}>
+                  <Text color={lay.hideCacheBar ? undefined : 'claude'} dimColor={lay.hideCacheBar}>{lay.hideCacheBar ? '☐' : '☑'}</Text>
+                  <Text dimColor={lay.hideCacheBar}>  Cache health bar in this card</Text>
+                </Button>
+              </Box>
+              <Box key="themes" flexDirection="column" flexShrink={0}>
+                {heading('th', 'THEME')}
+                {[{ id: null as string | null, name: 'App colours' }, ...Object.entries(THEMES).map(([id, t]) => ({ id: id as string | null, name: t.name }))].map(o => {
+                  const isOn = (lay.theme ?? null) === o.id
+                  return (
+                    <Button key={`theme-${o.id ?? 'app'}`} plain onPress={() => void setLayout({ theme: o.id })}>
+                      <Text color={isOn ? 'claude' : undefined} dimColor={!isOn}>{isOn ? '◉' : '○'}</Text>
+                      <Text bold={isOn} dimColor={!isOn}>{`  ${o.name}`}</Text>
+                    </Button>
+                  )
+                })}
+              </Box>
+            </Box>
           </Box>
         )}
       </Box>
@@ -1136,9 +1180,9 @@ export const register: Register = on => {
         ? [<Text key="none" dimColor>{sc.at > 0 ? 'No cache data in the transcripts.' : 'Reading the transcripts…'}</Text>]
         : [
             stats('c', [
-              stat('f', 'STARTING LOAD', k(ch.first), { sub: 'first request' }),
-              stat('t', 'REQUESTS THIS TURN', String(turnReqs), { color: turnReqs > TURN_MAX ? 'error' : undefined, sub: `limit ${TURN_MAX}` }),
-              stat('r', 'REBUILDS', String(ch.rebuildCount), { sub: `${k(ch.rebuildTokens)} written` }),
+              stat('f', 'STARTING LOAD', k(ch.first), { sub: 'first request', w: stat3 }),
+              stat('t', 'REQUESTS THIS TURN', String(turnReqs), { color: turnReqs > TURN_MAX ? 'error' : undefined, sub: `limit ${TURN_MAX}`, w: stat3 }),
+              stat('r', 'REBUILDS', String(ch.rebuildCount), { sub: `${k(ch.rebuildTokens)} written`, w: stat3 }),
             ]),
             ch.memoryChars !== null && (
               <Box key="mem" flexDirection="column">
@@ -1226,7 +1270,7 @@ export const register: Register = on => {
       log: () => section('log', 'Activity', errorsNow > 0 ? `${lines.length} events · ${errorsNow} errors` : `${lines.length} events`, logBody),
     }
 
-    return (
+    const tree = (
       <Box flexDirection="column" gap={1}>
         {vitalsCard}
         {lay.order.filter(id => !lay.hidden.includes(id)).map(id => byId[id]?.())}
@@ -1247,5 +1291,6 @@ export const register: Register = on => {
         </Text>
       </Box>
     )
+    return theme ? paint(tree, theme) : tree
   })
 }

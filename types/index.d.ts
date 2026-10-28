@@ -82,7 +82,8 @@ export type Turn = { startedAt: number; edits: number; errors: number; tools: nu
 export type Receipt = { durationMs: number; agents: number; edits: number; errors: number; tools: number; costDelta: number | null; reason: string }
 
 /** The pane's sections in order, and those ticked off; Vitals is always shown and not listed. */
-export type Layout = { order: string[]; hidden: string[] }
+// hideCacheBar: the Cache health bar is off the top card; theme: a THEMES id, absent for the app's own colours.
+export type Layout = { order: string[]; hidden: string[]; hideCacheBar?: boolean; theme?: string }
 export type LogLine = { at: number; who: string; text: string; kind: 'info' | 'error' | 'done' }
 
 declare module 'claude-code' {

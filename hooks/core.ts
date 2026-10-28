@@ -273,15 +273,29 @@ export const defaultLayout = (): Layout => ({ order: [...SECTION_IDS], hidden: [
 
 /** Any stored value made a valid layout: known ids once each, in their saved order, new sections last. */
 export const cleanLayout = (raw: unknown): Layout => {
-  const r = (raw ?? {}) as { order?: unknown; hidden?: unknown }
+  const r = (raw ?? {}) as { order?: unknown; hidden?: unknown; hideCacheBar?: unknown; theme?: unknown }
   const ids = (x: unknown) => (Array.isArray(x) ? x.filter((id): id is string => typeof id === 'string' && SECTION_IDS.includes(id)) : [])
   const order = [...new Set(ids(r.order))]
-  return { order: [...order, ...SECTION_IDS.filter(id => !order.includes(id))], hidden: [...new Set(ids(r.hidden))] }
+  return {
+    order: [...order, ...SECTION_IDS.filter(id => !order.includes(id))],
+    hidden: [...new Set(ids(r.hidden))],
+    ...(r.hideCacheBar === true ? { hideCacheBar: true } : {}),
+    ...(typeof r.theme === 'string' && r.theme in THEMES ? { theme: r.theme } : {}),
+  }
 }
 
 /** A message from the section chips: tick one, or move one to a new place. Anything else leaves it as it was. */
 export const applyLayoutMessage = (l: Layout, data: unknown): Layout => {
-  const d = (data ?? {}) as { toggle?: unknown; move?: { id?: unknown; to?: unknown } }
+  const d = (data ?? {}) as { toggle?: unknown; move?: { id?: unknown; to?: unknown }; flag?: unknown; theme?: unknown }
+  if (d.flag === 'cacheBar') {
+    const { hideCacheBar, ...rest } = l
+    return hideCacheBar ? rest : { ...rest, hideCacheBar: true }
+  }
+  // A theme id picks it; null goes back to the app's own colours.
+  if (d.theme === null || (typeof d.theme === 'string' && d.theme in THEMES)) {
+    const { theme: _, ...rest } = l
+    return d.theme === null ? rest : { ...rest, theme: d.theme as string }
+  }
   if (typeof d.toggle === 'string' && l.order.includes(d.toggle)) {
     const id = d.toggle
     return { ...l, hidden: l.hidden.includes(id) ? l.hidden.filter(x => x !== id) : [...l.hidden, id] }
@@ -294,4 +308,76 @@ export const applyLayoutMessage = (l: Layout, data: unknown): Layout => {
     return { ...l, order: [...rest.slice(0, at), id, ...rest.slice(at)] }
   }
   return l
+}
+
+// ---- themes: a palette laid over the drawn tree. Without one the pane keeps the app's own colours.
+// Frostwerk: Blueprint's theme of that name (brand_tokens), its oklch values as hex.
+// Reader: the Blueprint Reader page's paper, ink and slate.
+export type Theme = {
+  name: string
+  bg: string
+  card: string
+  fg: string
+  muted: string
+  border: string
+  /** theme keys the pane names, and what each becomes */
+  keys: Record<string, string>
+}
+export const THEMES: Record<string, Theme> = {
+  frostwerk: {
+    name: 'Frostwerk',
+    bg: '#02060d', card: '#070e17', fg: '#e8ebef', muted: '#848d98', border: '#222933',
+    keys: {
+      claude: '#00c2e8', suggestion: '#00c2e8', success: '#4bc98f', warning: '#fb7c00', error: '#db4241',
+      text: '#b9d3db', merged: '#9e91e4', bashBorder: '#fb7c00', planMode: '#5b748e', inactive: '#848d98', permission: '#9e91e4',
+    },
+  },
+  reader: {
+    name: 'Reader',
+    bg: '#efe8db', card: '#f7f3ea', fg: '#2f2c28', muted: '#8b8375', border: '#d8cebc',
+    keys: {
+      claude: '#46545c', suggestion: '#46545c', success: '#5b7a4a', warning: '#8a5a1f', error: '#a1463a',
+      text: '#5e584f', merged: '#7a5e86', bashBorder: '#a1463a', planMode: '#4f7470', inactive: '#b3aa9a', permission: '#6a6f94',
+    },
+  },
+}
+
+type Node = { type?: string; props?: Record<string, unknown>; children?: unknown[] } | string | null | undefined | false
+/**
+ * The tree drawn in a theme: every Text takes the theme's ink (dim text its muted ink), named colours
+ * become the theme's, and a bordered Box becomes a card. Pure: returns a new tree.
+ */
+export const paint = <T>(node: T, t: Theme, isRoot = true): T => {
+  if (Array.isArray(node)) return node.map(c => paint(c, t, false)) as T
+  const n = node as Node
+  if (!n || typeof n !== 'object') return node
+  const props = { ...(n.props ?? {}) }
+  const map = (c: unknown) => (typeof c === 'string' ? (t.keys[c] ?? c) : c)
+  if (n.type === 'Text') {
+    if (props.color !== undefined) props.color = map(props.color)
+    else props.color = props.dimColor ? t.muted : t.fg
+    if (props.dimColor) {
+      if (props.color === t.fg) props.color = t.muted
+      delete props.dimColor
+    }
+    if (props.backgroundColor !== undefined) props.backgroundColor = map(props.backgroundColor)
+  } else if (n.type === 'Box') {
+    if (props.borderStyle !== undefined) {
+      props.borderColor = props.borderColor !== undefined ? map(props.borderColor) : t.border
+      delete props.borderDimColor
+      props.backgroundColor = t.card
+    } else if (props.backgroundColor !== undefined) props.backgroundColor = map(props.backgroundColor)
+    if (isRoot) props.backgroundColor = t.bg
+  }
+  const hover = props.hover as Record<string, unknown> | undefined
+  if (hover && typeof hover === 'object') {
+    const h2 = { ...hover }
+    if ('borderDimColor' in h2) delete h2.borderDimColor
+    if (h2.color !== undefined) h2.color = map(h2.color)
+    if (h2.borderColor !== undefined) h2.borderColor = map(h2.borderColor)
+    props.hover = h2
+  }
+  const out: Record<string, unknown> = { ...n, props }
+  if (Array.isArray(n.children)) out.children = n.children.map(c => paint(c, t, false))
+  return out as T
 }
