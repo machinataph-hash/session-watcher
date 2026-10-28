@@ -1284,7 +1284,7 @@ export const register: Register = on => {
     // Under a theme the pane's own background is the theme's, with a margin around the cards, and it
     // fills the pane so no app colour shows around them.
     const tree = (
-      <Box flexDirection="column" gap={1} {...(theme ? { padding: 1, flexGrow: 1 } : {})}>
+      <Box flexDirection="column" gap={1} {...(theme ? { flexGrow: 1 } : {})}>
         {vitalsCard}
         {lay.order.filter(id => !lay.hidden.includes(id)).map(id => byId[id]?.())}
         <Box key="actions" flexDirection="row" flexWrap="wrap" gap={1} alignItems="center">
