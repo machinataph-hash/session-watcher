@@ -269,6 +269,13 @@ for (const surface of ['terminal', 'desktop'] as const)
     await ui.pointer({ type: 'down', x: 0, y: 1, button: 'left', in: 'section-chips' })
     await ui.pointer({ type: 'up', x: 0, y: 1, button: 'left', in: 'section-chips' })
     expect(await ui.find({ key: 'sec-tasks' })).toBeUndefined()
+    // A click on the title, not the box, ticks it too: it comes back, then goes again.
+    await ui.pointer({ type: 'down', x: 12, y: 1, button: 'left', in: 'section-chips' })
+    await ui.pointer({ type: 'up', x: 12, y: 1, button: 'left', in: 'section-chips' })
+    expect(await ui.find({ key: 'sec-tasks' })).toBeDefined()
+    await ui.pointer({ type: 'down', x: 12, y: 1, button: 'left', in: 'section-chips' })
+    await ui.pointer({ type: 'up', x: 12, y: 1, button: 'left', in: 'section-chips' })
+    expect(await ui.find({ key: 'sec-tasks' })).toBeUndefined()
     // Drag Activity (row 7) to the top.
     await ui.pointer({ type: 'down', x: 6, y: 7, button: 'left', in: 'section-chips' })
     await ui.pointer({ type: 'move', x: 6, y: 0, button: 'left', in: 'section-chips' })

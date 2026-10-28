@@ -1,5 +1,5 @@
-// The section chips in Vitals' settings: one row per section. Press the box to show or hide it;
-// press anywhere else on the row and drag to move it. Rows are one cell tall, so the row under
+// The section chips in Vitals' settings: one row per section. Click anywhere on a row to show or
+// hide it; press and drag it to another row to move it. Rows are one cell tall, so the row under
 // the pointer is its y. The hooks module keeps the layout; this only draws and posts.
 import type { ClientModule } from 'claude-code'
 
@@ -29,10 +29,8 @@ const Chips: ClientModule<Props, State> = (props, surface) => {
       const y = Math.floor(p.y)
       const item = items[y]
       if (!item) return
-      if (p.x < 3) {
-        set(null)
-        surface.post({ toggle: item.id })
-      } else set({ from: y, over: y, isHeld: true })
+      // A click anywhere on the row ticks it; a drag to another row moves it. The release decides.
+      set({ from: y, over: y, isHeld: true })
     } else if (p.type === 'move' && live?.isHeld) {
       const over = clamp(p.y)
       if (over !== live.over) set({ ...live, over })
@@ -41,7 +39,10 @@ const Chips: ClientModule<Props, State> = (props, surface) => {
       if (item && live.over !== live.from) {
         surface.post({ move: { id: item.id, to: live.over } })
         set({ from: live.over, over: live.over, isHeld: false })
-      } else set(null)
+      } else {
+        set(null)
+        if (item) surface.post({ toggle: item.id })
+      }
     }
   })
   // While dragging, the list is drawn in the order it will take when dropped.
