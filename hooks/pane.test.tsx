@@ -130,7 +130,7 @@ test('cache health section and its Vitals line', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: /^STARTING LOAD$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^92k$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^18,057 \/ 10,000 chars/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /^  red$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^  Bad$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^idle over 1 hour$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^resolve_references$/ })).toBeDefined()
 })
