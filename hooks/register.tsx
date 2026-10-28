@@ -663,20 +663,14 @@ export const register: Register = on => {
 
     const isOpen = (id: string) => open.includes(id)
     const flip = (id: string) => update($, sections, l => (l.includes(id) ? l.filter(x => x !== id) : [...l, id]))
-    // A clickable title: always the surface's own Button, in its normal font. A desktop draws a Button's
-    // text in the app's ink, which a theme cannot change, so a theme with a light card (Reader) sets each
-    // one on a dark strip (its pill) that the app's light ink shows against.
+    // A clickable title: the surface's own Button, in its normal font, its text in the theme's colours.
     type R = { text: string; color?: string; dim?: boolean; bold?: boolean; size?: string }
-    const pill = e.surface === 'desktop' ? theme?.pill : undefined
-    const pressable = (key: string, runs: R[], onPress: () => void) => {
-      const button = (
-        <Button key={key} plain onPress={onPress}>
-          {runs.map((r, i) => <Text key={`r${i}`} color={pill ? (r.dim ? theme?.pillMuted : theme?.pillInk) : r.color} dimColor={pill ? undefined : r.dim} bold={r.bold} size={r.size as never}>{r.text}</Text>)}
-        </Button>
-      )
-      // On a pill the text is light, whichever ink draws it: the theme's (if honoured) or the app's.
-      return pill ? <Box key={`${key}-pill`} alignSelf="flex-start" flexShrink={1} minWidth={0} backgroundColor={pill} paddingX={1}>{button}</Box> : button
-    }
+    // A plain Button whose text is the mod's own Text, so it takes the theme's colours like all other text.
+    const pressable = (key: string, runs: R[], onPress: () => void) => (
+      <Button key={key} plain onPress={onPress}>
+        {runs.map((r, i) => <Text key={`r${i}`} color={r.color} dimColor={r.dim} bold={r.bold} size={r.size as never}>{r.text}</Text>)}
+      </Button>
+    )
 
     // One collapsible section: a header row that opens and closes it, a one-line summary while closed.
     const section = (id: string, title: string, summary: string, body: () => unknown) => {
@@ -757,7 +751,6 @@ export const register: Register = on => {
     const Client = 'Client' in ui ? ui.Client : undefined
     const palette = theme ? { palette: { bg: theme.card, fg: theme.fg, muted: theme.muted, accent: theme.keys.claude ?? theme.fg } } : {}
     const themeChoices = [{ id: 'app', name: 'Original' }, ...Object.entries(THEMES).map(([id, t]) => ({ id, name: t.name }))]
-    const Select = 'Select' in ui ? ui.Select : undefined
     const chips = Client ? (
       <Client key={CHIPS} module="./chips.tsx" props={{ items: chipItems, ...palette }} height={chipItems.length} />
     ) : (
@@ -873,17 +866,12 @@ export const register: Register = on => {
               </Box>
               <Box key="themes" flexDirection="column" flexShrink={0} gap={1}>
                 {heading('th', 'THEME')}
-                {/* A dropdown where the surface has one: the surface draws it, so it reads in any theme. */}
-                {Select ? (
-                  <Box key="theme-pill" alignSelf="flex-start" flexShrink={0} {...(pill ? { backgroundColor: pill } : {})}>
-                    <Select key="theme" options={themeChoices.map(o => ({ value: o.id, label: o.name }))} value={lay.theme ?? 'app'} onSelect={v => void setLayout({ theme: v === 'app' ? null : v })} />
-                  </Box>
-                ) : (
-                  themeChoices.map(o => {
+                <Box key="theme-list" flexDirection="column">
+                  {themeChoices.map(o => {
                     const isOn = (lay.theme ?? 'app') === o.id
-                    return pressable(`theme-${o.id}`, [{ text: isOn ? '◉' : '○', color: isOn ? 'claude' : undefined, dim: !isOn }, { text: `  ${o.name}`, bold: isOn, dim: !isOn }], () => void setLayout({ theme: o.id === 'app' ? null : o.id }))
-                  })
-                )}
+                    return pressable(`theme-${o.id}`, [{ text: isOn ? '☑' : '☐', dim: !isOn }, { text: ` ${o.name}`, bold: isOn, dim: !isOn }], () => void setLayout({ theme: o.id === 'app' ? null : o.id }))
+                  })}
+                </Box>
               </Box>
             </Box>
           </Box>

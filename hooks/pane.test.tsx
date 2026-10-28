@@ -289,19 +289,22 @@ for (const surface of ['terminal', 'desktop'] as const)
   })
 
 // The theme is a dropdown; the Cache health bar flag is a Button. Both picks are saved.
-test('desktop: the theme dropdown picks a theme, and the Cache health bar flag flips', async ($, on) => {
+test('desktop: a theme checkbox picks a theme, and the Cache health bar flag flips', async ($, on) => {
   mock.clock(on)
   mock.store(on)
   await start($, on)
   const ui = await mount($, 'desktop')
   await ui.press({ key: 'settings' })
-  await ui.select({ key: 'theme', value: 'reader' })
-  expect(((await ui.find({ key: 'theme' })) as any)?.props?.value).toBe('reader')
-  expect(await ui.find({ type: 'Text', text: '☑' })).toBeDefined()
+  const ticked = async (key: string) => (((await ui.find({ key })) as any)?.children?.[0]?.children ?? []).join('') === '☑'
+  expect(await ticked('theme-app')).toBe(true)
+  await ui.press({ key: 'theme-reader' })
+  expect(await ticked('theme-reader')).toBe(true)
+  expect(await ticked('theme-app')).toBe(false)
+  expect(await ticked('cache-bar-flag')).toBe(true)
   await ui.press({ key: 'cache-bar-flag' })
-  expect(await ui.find({ type: 'Text', text: '☐' })).toBeDefined()
-  await ui.select({ key: 'theme', value: 'app' })
-  expect(((await ui.find({ key: 'theme' })) as any)?.props?.value).toBe('app')
+  expect(await ticked('cache-bar-flag')).toBe(false)
+  await ui.press({ key: 'theme-app' })
+  expect(await ticked('theme-app')).toBe(true)
 })
 
 test('a stored layout is cleaned: unknown ids dropped, new sections added last', () => {
@@ -373,8 +376,8 @@ test('chips: in every theme, text is drawn in a colour unlike its background', (
   }
 })
 
-// The theme rule: in every theme, no text is drawn in its background's colour. A desktop Button keeps
-// the app's light ink, so in a theme with a light card every Button that holds text sits on its dark pill.
+// The theme rule: in every theme, no text is drawn in its background's colour, Button text included:
+// every Button's text is the mod's own Text in a theme colour, with no strip behind it.
 for (const id of Object.keys(THEMES))
   test(`desktop, ${id}: no text in the background's colour, and every Button reads`, async ($, on) => {
     const t = THEMES[id]!
@@ -383,7 +386,7 @@ for (const id of Object.keys(THEMES))
     await start($, on)
     const ui = await mount($, 'desktop')
     await ui.press({ key: 'settings' })
-    expect(await ui.find({ key: 'theme' })).toBeDefined()
+    expect(await ui.find({ key: `theme-${id}` })).toBeDefined()
     for (const x of await ui.findAll({ type: 'Text' })) {
       const c = (x as any).props?.color
       expect(typeof c).toBe('string')
@@ -391,18 +394,8 @@ for (const id of Object.keys(THEMES))
     }
     const holding = (await ui.findAll({ type: 'Button' })).filter(b => ((b as any).children ?? []).length > 0)
     expect(holding.length).toBeGreaterThan(3)
-    const pills = (await ui.findAll({ type: 'Box' })).filter(b => (b as any).props?.backgroundColor === t.pill && t.pill !== undefined)
-    // Each Button with text, and each dropdown, sits on a pill.
-    const selects = (await ui.findAll({ type: 'Select' })).length
-    expect(pills.length).toBe(t.pill ? holding.length + selects : 0)
-    // The pills are dark against the card: the app's light ink shows on them.
-    const lum = (hex: string) => { const n = parseInt(hex.slice(1), 16); return (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255 }
-    if (t.pill) expect(lum(t.pill)).toBeLessThan(0.4)
-    // Text on a pill is light, so it reads on the pill however the Button draws it.
-    if (t.pill) for (const b of holding) for (const x of ((b as any).children ?? []) as any[]) {
-      if (x?.type === 'Text') expect(lum(x.props.color)).toBeGreaterThan(0.6)
-    }
-    else expect(lum(t.card)).toBeLessThan(0.4)
+    for (const b of holding) for (const x of ((b as any).children ?? []) as any[]) expect(x?.type).toBe('Text')
+    expect((await ui.findAll({ type: 'Box' })).filter(b => (b as any).props?.backgroundColor !== undefined && (b as any).props?.backgroundColor !== t.card)).toHaveLength(0)
     // A task header is still a Button, and pressing it opens or closes the task.
     const task = holding.map(b => String((b as any).key)).find(k => k.startsWith('open-'))
     expect(task).toBeDefined()
