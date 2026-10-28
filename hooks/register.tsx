@@ -675,7 +675,7 @@ export const register: Register = on => {
         </Button>
       )
       // On a pill the text is light, whichever ink draws it: the theme's (if honoured) or the app's.
-      return pill ? <Box key={`${key}-pill`} backgroundColor={pill} paddingX={1}>{button}</Box> : button
+      return pill ? <Box key={`${key}-pill`} alignSelf="flex-start" flexShrink={1} minWidth={0} backgroundColor={pill} paddingX={1}>{button}</Box> : button
     }
 
     // One collapsible section: a header row that opens and closes it, a one-line summary while closed.
@@ -858,8 +858,10 @@ export const register: Register = on => {
         </Box>
         {settingsOpen && (
           <Box key="settings-body" flexDirection="column" gap={1}>
-            {/* Longer than any pane and clipped to the card's width, so it spans the card however wide it is. */}
-            <Text key="sep" dimColor wrap="truncate-end">{'─'.repeat(Math.max(inner, 600))}</Text>
+            {/* Longer than any pane, held to one line by its box, so it spans the card with no clip mark. */}
+            <Box key="sep" height={1} overflow="hidden">
+              <Text dimColor wrap="wrap">{'─'.repeat(Math.max(inner, 600))}</Text>
+            </Box>
             <Box key="cols" flexDirection="row" flexWrap="wrap" columnGap={4} rowGap={1}>
               <Box key="secs" flexDirection="column" flexShrink={0} gap={1}>
                 {heading('sh', 'SECTIONS · TICK TO SHOW · DRAG TO MOVE')}
@@ -873,7 +875,7 @@ export const register: Register = on => {
                 {heading('th', 'THEME')}
                 {/* A dropdown where the surface has one: the surface draws it, so it reads in any theme. */}
                 {Select ? (
-                  <Box key="theme-pill" alignSelf="flex-start" {...(pill ? { backgroundColor: pill } : {})}>
+                  <Box key="theme-pill" alignSelf="flex-start" flexShrink={0} {...(pill ? { backgroundColor: pill } : {})}>
                     <Select key="theme" options={themeChoices.map(o => ({ value: o.id, label: o.name }))} value={lay.theme ?? 'app'} onSelect={v => void setLayout({ theme: v === 'app' ? null : v })} />
                   </Box>
                 ) : (
