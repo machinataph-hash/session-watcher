@@ -873,7 +873,9 @@ export const register: Register = on => {
                 {heading('th', 'THEME')}
                 {/* A dropdown where the surface has one: the surface draws it, so it reads in any theme. */}
                 {Select ? (
-                  <Select key="theme" options={themeChoices.map(o => ({ value: o.id, label: o.name }))} value={lay.theme ?? 'app'} onSelect={v => void setLayout({ theme: v === 'app' ? null : v })} />
+                  <Box key="theme-pill" alignSelf="flex-start" {...(pill ? { backgroundColor: pill } : {})}>
+                    <Select key="theme" options={themeChoices.map(o => ({ value: o.id, label: o.name }))} value={lay.theme ?? 'app'} onSelect={v => void setLayout({ theme: v === 'app' ? null : v })} />
+                  </Box>
                 ) : (
                   themeChoices.map(o => {
                     const isOn = (lay.theme ?? 'app') === o.id
@@ -1281,8 +1283,7 @@ export const register: Register = on => {
       log: () => section('log', 'Activity', errorsNow > 0 ? `${lines.length} events · ${errorsNow} errors` : `${lines.length} events`, logBody),
     }
 
-    // Under a theme the pane's own background is the theme's, with a margin around the cards, and it
-    // fills the pane so no app colour shows around them.
+    // The pane keeps the app's own background around the cards, so no second colour frames them.
     const tree = (
       <Box flexDirection="column" gap={1} {...(theme ? { flexGrow: 1 } : {})}>
         {vitalsCard}

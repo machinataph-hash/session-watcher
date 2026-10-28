@@ -335,10 +335,10 @@ test('layout: cache-bar flag and theme are kept, unknown themes dropped', () => 
   expect(applyLayoutMessage(l, { theme: null }).theme).toBeUndefined()
 })
 
-test('paint: root gets the theme background, plain text the theme ink', () => {
+test('paint: root keeps the app background, plain text the theme ink', () => {
   const t = THEMES.frostwerk!
   const out = paint({ type: 'Box', props: {}, children: [{ type: 'Text', props: { dimColor: true }, children: ['x'] }] } as never, t) as any
-  expect(out.props.backgroundColor).toBe(t.bg)
+  expect(out.props.backgroundColor).toBeUndefined()
   expect(out.children[0].props.color).toBe(t.muted)
 })
 
@@ -392,7 +392,9 @@ for (const id of Object.keys(THEMES))
     const holding = (await ui.findAll({ type: 'Button' })).filter(b => ((b as any).children ?? []).length > 0)
     expect(holding.length).toBeGreaterThan(3)
     const pills = (await ui.findAll({ type: 'Box' })).filter(b => (b as any).props?.backgroundColor === t.pill && t.pill !== undefined)
-    expect(pills.length).toBe(t.pill ? holding.length : 0)
+    // Each Button with text, and each dropdown, sits on a pill.
+    const selects = (await ui.findAll({ type: 'Select' })).length
+    expect(pills.length).toBe(t.pill ? holding.length + selects : 0)
     // The pills are dark against the card: the app's light ink shows on them.
     const lum = (hex: string) => { const n = parseInt(hex.slice(1), 16); return (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255 }
     if (t.pill) expect(lum(t.pill)).toBeLessThan(0.4)

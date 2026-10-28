@@ -372,7 +372,6 @@ export const paint = <T>(node: T, t: Theme, isRoot = true): T => {
       delete props.borderDimColor
       props.backgroundColor = t.card
     } else if (props.backgroundColor !== undefined) props.backgroundColor = map(props.backgroundColor)
-    if (isRoot) props.backgroundColor = t.bg
   }
   const hover = props.hover as Record<string, unknown> | undefined
   if (hover && typeof hover === 'object') {
