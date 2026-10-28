@@ -853,20 +853,26 @@ export const register: Register = on => {
               <Box key="secs" flexDirection="column" flexShrink={0} gap={1}>
                 {heading('sh', 'SECTIONS · TICK TO SHOW · DRAG TO MOVE')}
                 {chips}
-                <Button key="cache-bar-flag" plain onPress={() => void setLayout({ flag: 'cacheBar' })}>
-                  <Text color={lay.hideCacheBar ? undefined : 'claude'} dimColor={lay.hideCacheBar}>{lay.hideCacheBar ? '☐' : '☑'}</Text>
+                {/* A desktop Button draws its label in the app's own ink, not the theme's, so only the box is
+                    the Button and the label is plain Text, as in the section list. */}
+                <Box key="cache-bar-row" flexDirection="row">
+                  <Button key="cache-bar-flag" plain onPress={() => void setLayout({ flag: 'cacheBar' })}>
+                    <Text color={lay.hideCacheBar ? undefined : 'claude'} dimColor={lay.hideCacheBar}>{lay.hideCacheBar ? '☐' : '☑'}</Text>
+                  </Button>
                   <Text dimColor={lay.hideCacheBar}>  Cache health bar in this card</Text>
-                </Button>
+                </Box>
               </Box>
               <Box key="themes" flexDirection="column" flexShrink={0}>
                 {heading('th', 'THEME')}
                 {[{ id: null as string | null, name: 'Original' }, ...Object.entries(THEMES).map(([id, t]) => ({ id: id as string | null, name: t.name }))].map(o => {
                   const isOn = (lay.theme ?? null) === o.id
                   return (
-                    <Button key={`theme-${o.id ?? 'app'}`} plain onPress={() => void setLayout({ theme: o.id })}>
-                      <Text color={isOn ? 'claude' : undefined} dimColor={!isOn}>{isOn ? '◉' : '○'}</Text>
+                    <Box key={`theme-row-${o.id ?? 'app'}`} flexDirection="row">
+                      <Button key={`theme-${o.id ?? 'app'}`} plain onPress={() => void setLayout({ theme: o.id })}>
+                        <Text color={isOn ? 'claude' : undefined} dimColor={!isOn}>{isOn ? '◉' : '○'}</Text>
+                      </Button>
                       <Text bold={isOn} dimColor={!isOn}>{`  ${o.name}`}</Text>
-                    </Button>
+                    </Box>
                   )
                 })}
               </Box>
