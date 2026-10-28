@@ -229,6 +229,7 @@ export const register: Register = on => {
       ticking = true
       $.clock.every(1000, () => $.ui.invalidate('ui.render'))
     }
+    void $.ui.open({ id: PANE, title: 'Session Watcher' }).catch(() => undefined)
     return next(e)
   })
 
