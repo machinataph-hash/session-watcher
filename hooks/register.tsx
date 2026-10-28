@@ -553,7 +553,7 @@ export const register: Register = on => {
     const isNarrow = inner < 38
 
     const heading = (key: string, text: string) => (
-      <Text key={key} size="caption" weight="semibold" dimColor wrap="truncate-end">
+      <Text key={key} bold dimColor wrap="truncate-end">
         {text}
       </Text>
     )
