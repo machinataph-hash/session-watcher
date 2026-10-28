@@ -81,6 +81,8 @@ export type Gate = { totals: Record<Bucket, Tally>; recent: Check[] }
 export type Turn = { startedAt: number; edits: number; errors: number; tools: number; costAtStart: number | null }
 export type Receipt = { durationMs: number; agents: number; edits: number; errors: number; tools: number; costDelta: number | null; reason: string }
 
+/** The pane's sections in order, and those ticked off; Vitals is always shown and not listed. */
+export type Layout = { order: string[]; hidden: string[] }
 export type LogLine = { at: number; who: string; text: string; kind: 'info' | 'error' | 'done' }
 
 declare module 'claude-code' {
@@ -97,6 +99,7 @@ declare module 'claude-code' {
       receipt: Receipt | null
       log: LogLine[]
       sections: string[]
+      layout: Layout
       taskToggles: number[]
       copied: string
     }

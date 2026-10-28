@@ -1,7 +1,7 @@
 // Pure helpers: numbers, prices, formatting. No engine calls here.
 import type { ModelUsage, SessionContextBreakdown } from 'claude-code'
 
-import type { Bucket, Gate, Row, Scan, Task, Usage } from '../types'
+import type { Bucket, Gate, Layout, Row, Scan, Task, Usage } from '../types'
 
 export const empty = (): Usage => ({ input: 0, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0, output: 0, calls: 0, usd: 0 })
 export const mainRow = (): Row => ({ id: 'main', who: 'main thread', type: 'main', models: [], usage: empty() })
@@ -255,4 +255,43 @@ export const estimateLimit = (m: LimitModel, l: LimitReading): number | null => 
   if (!(perPct > 0)) return null
   // The engine rounds down, so the true value sits between pct and pct + 1.
   return Math.round(100 * Math.min(l.pct + 0.99, l.pct + (m.spent - t.spent) / perPct)) / 100
+}
+
+// The pane's section layout: which sections show and in what order. Vitals is not in it; it always shows.
+export const SECTIONS: { id: string; title: string }[] = [
+  { id: 'session', title: 'Session totals' },
+  { id: 'tasks', title: 'Tasks' },
+  { id: 'requests', title: 'Recent requests' },
+  { id: 'agents', title: 'Sub-agents' },
+  { id: 'gate', title: 'Permissions' },
+  { id: 'cache', title: 'Cache health' },
+  { id: 'turn', title: 'Last turn' },
+  { id: 'log', title: 'Activity' },
+]
+const SECTION_IDS = SECTIONS.map(s => s.id)
+export const defaultLayout = (): Layout => ({ order: [...SECTION_IDS], hidden: [] })
+
+/** Any stored value made a valid layout: known ids once each, in their saved order, new sections last. */
+export const cleanLayout = (raw: unknown): Layout => {
+  const r = (raw ?? {}) as { order?: unknown; hidden?: unknown }
+  const ids = (x: unknown) => (Array.isArray(x) ? x.filter((id): id is string => typeof id === 'string' && SECTION_IDS.includes(id)) : [])
+  const order = [...new Set(ids(r.order))]
+  return { order: [...order, ...SECTION_IDS.filter(id => !order.includes(id))], hidden: [...new Set(ids(r.hidden))] }
+}
+
+/** A message from the section chips: tick one, or move one to a new place. Anything else leaves it as it was. */
+export const applyLayoutMessage = (l: Layout, data: unknown): Layout => {
+  const d = (data ?? {}) as { toggle?: unknown; move?: { id?: unknown; to?: unknown } }
+  if (typeof d.toggle === 'string' && l.order.includes(d.toggle)) {
+    const id = d.toggle
+    return { ...l, hidden: l.hidden.includes(id) ? l.hidden.filter(x => x !== id) : [...l.hidden, id] }
+  }
+  const id = d.move?.id
+  const to = d.move?.to
+  if (typeof id === 'string' && typeof to === 'number' && Number.isInteger(to) && l.order.includes(id)) {
+    const rest = l.order.filter(x => x !== id)
+    const at = Math.max(0, Math.min(rest.length, to))
+    return { ...l, order: [...rest.slice(0, at), id, ...rest.slice(at)] }
+  }
+  return l
 }

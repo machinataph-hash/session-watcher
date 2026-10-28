@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
-import { breakdownText, emptyLimitModel, estimateLimit, fromModel, stepLimitModel, usdOf, weighted } from './core'
+import { applyLayoutMessage, breakdownText, cleanLayout, defaultLayout, emptyLimitModel, estimateLimit, fromModel, stepLimitModel, usdOf, weighted } from './core'
 
 const pane = { title: '', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} } as const
 const usage = { model: 'claude-opus-5-5', input_tokens: 1000, output_tokens: 2000, cache_read_input_tokens: 100000, cache_creation_input_tokens: 4000 }
@@ -250,4 +250,52 @@ test('a new window at 0% starts clean, a shift of milliseconds is the same windo
   expect(m.spent).toBe(1)
   m = stepLimitModel(m, 'a', 0.6, five(0, 10 * H), 4)
   expect(estimateLimit(m, one(0))).toBe(0.7)
+})
+
+// Settings under Vitals: the cog opens the section chips; a tick hides a section, a drag moves it, and both are kept.
+for (const surface of ['terminal', 'desktop'] as const)
+  test(`${surface}: the section chips hide and move sections, and the layout is saved`, async ($, on) => {
+    mock.clock(on)
+    mock.store(on)
+    await start($, on)
+    const ui = await mount($, surface)
+    expect(await ui.find({ type: 'Text', text: /SECTIONS · TICK/ })).toBeUndefined()
+    await ui.press({ key: 'settings' })
+    expect(await ui.find({ type: 'Text', text: /SECTIONS · TICK/ })).toBeDefined()
+    // Untick Tasks (row 1): its section goes, its chip stays.
+    expect(await ui.find({ type: 'Text', text: /^Tasks$/ })).toBeDefined()
+    await ui.pointer({ type: 'down', x: 0, y: 1, button: 'left' })
+    await ui.pointer({ type: 'up', x: 0, y: 1, button: 'left' })
+    expect(await ui.find({ key: 'sec-tasks' })).toBeUndefined()
+    // Drag Activity (row 7) to the top.
+    await ui.pointer({ type: 'down', x: 6, y: 7, button: 'left' })
+    await ui.pointer({ type: 'move', x: 6, y: 0, button: 'left' })
+    await ui.pointer({ type: 'up', x: 6, y: 0, button: 'left' })
+    const keys = (await ui.findAll({ type: 'Button' })).map(b => (b as { key?: string }).key).filter(x => x?.startsWith('sec-') && x !== 'sec-vitals')
+    expect(keys[0]).toBe('sec-log')
+    expect(keys).not.toContain('sec-tasks')
+    // The sections themselves still open and close.
+    await ui.press({ key: 'sec-log' })
+    await ui.press({ key: 'settings' })
+    expect(await ui.find({ type: 'Text', text: /SECTIONS · TICK/ })).toBeUndefined()
+  })
+
+test('a stored layout is cleaned: unknown ids dropped, new sections added last', () => {
+  expect(cleanLayout({ order: ['log', 'nope', 'log', 'tasks'], hidden: ['x', 'gate'] })).toEqual({
+    order: ['log', 'tasks', 'session', 'requests', 'agents', 'gate', 'cache', 'turn'],
+    hidden: ['gate'],
+  })
+  expect(cleanLayout(null)).toEqual(defaultLayout())
+  expect(applyLayoutMessage(defaultLayout(), { move: { id: 'session', to: 99 } }).order.at(-1)).toBe('session')
+  expect(applyLayoutMessage(defaultLayout(), { toggle: 'nope' })).toEqual(defaultLayout())
+})
+
+test('a layout saved by an earlier session is used at start', async ($, on) => {
+  mock.clock(on)
+  mock.store(on, { layout: { order: ['gate', 'session'], hidden: ['tasks'] } })
+  await start($, on)
+  const ui = await mount($, 'desktop')
+  const keys = (await ui.findAll({ type: 'Button' })).map(b => (b as { key?: string }).key).filter(x => x?.startsWith('sec-') && x !== 'sec-vitals')
+  expect(keys.slice(0, 2)).toEqual(['sec-gate', 'sec-session'])
+  expect(keys).not.toContain('sec-tasks')
 })

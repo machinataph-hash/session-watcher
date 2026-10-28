@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { LimitModel } from './core'
-import type { Active, AgentCard, Bucket, CacheHealth, Call, Check, Gate, Limit, LogLine, Receipt, Row, Scan, Task, Turn, Usage, Vitals } from '../types'
+import type { Active, AgentCard, Bucket, CacheHealth, Call, Check, Gate, Layout, Limit, LogLine, Receipt, Row, Scan, Task, Turn, Usage, Vitals } from '../types'
 import {
   BUCKETS,
   EDIT_TOOLS,
@@ -14,6 +14,10 @@ import {
   dur,
   empty,
   emptyGate,
+  SECTIONS,
+  applyLayoutMessage,
+  cleanLayout,
+  defaultLayout,
   emptyLimitModel,
   estimateLimit,
   factorOf,
@@ -80,6 +84,12 @@ const MEMORY_BAR = 10000
 const MEMORY_RED = 5800
 const TURN_MAX = 15
 const sections = atom({ plugin: 'session-watcher', key: 'sections' } as const, DEFAULT_OPEN)
+// present in the same list: the settings under Vitals are open
+const SETTINGS_OPEN = 'settings-open'
+// Which sections show and in what order; kept in the store too, so every session starts with it.
+const layout = atom({ plugin: 'session-watcher', key: 'layout' } as const, defaultLayout() as Layout)
+const LAYOUT = 'layout'
+const CHIPS = 'section-chips'
 // Tasks whose open state differs from their default (the current task starts open, earlier ones closed).
 const taskToggles = atom({ plugin: 'session-watcher', key: 'taskToggles' } as const, [] as number[])
 const copied = atom({ plugin: 'session-watcher', key: 'copied' } as const, '')
@@ -208,6 +218,8 @@ export const register: Register = on => {
     })
     const now = await $.clock.now()
     await update($, tasks, l => (l.length === 0 ? [newTask('Unlabelled', now)] : l))
+    const saved = await $.store.get(LAYOUT).catch(() => undefined)
+    if (saved !== undefined) await update($, layout, () => cleanLayout(saved))
     await readUsage($, true)
     void readTranscript($)
     // The clocks move on their own, so the pane redraws each second.
@@ -216,6 +228,14 @@ export const register: Register = on => {
       $.clock.every(1000, () => $.ui.invalidate('ui.render'))
     }
     return next(e)
+  })
+
+  // The section chips post a tick or a move; the new layout is saved for later sessions.
+  on('ui.message', async ($, e, next) => {
+    if (e.element !== CHIPS) return next(e)
+    const l = await update($, layout, l0 => applyLayoutMessage(cleanLayout(l0), e.data))
+    await $.store.set(LAYOUT, l).catch(() => undefined)
+    return {}
   })
 
   on('session.end', async ($, e, next) => {
@@ -242,6 +262,8 @@ export const register: Register = on => {
     if (verb === 'reset') {
       await update($, sections, () => DEFAULT_OPEN)
       await update($, taskToggles, () => [])
+      await update($, layout, () => defaultLayout())
+      await $.store.set(LAYOUT, defaultLayout()).catch(() => undefined)
       return { text: 'Session Watcher sections reset to their defaults.' }
     }
     const opened = await $.ui.open({ id: PANE, title: 'Session Watcher' })
@@ -493,7 +515,7 @@ export const register: Register = on => {
     const { Box, Text, Button } = ui
     // The terminal draws bars as characters; the other surfaces have a proportional font, so an SVG.
     const Svg = e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : undefined
-    const [list0, log0, note, open, toggles, act, sc, v0, cards, g0, rc, lines, tn] = await Promise.all([
+    const [list0, log0, note, open, toggles, act, sc, v0, cards, g0, rc, lines, tn, lay0] = await Promise.all([
       read($, tasks),
       read($, calls),
       read($, copied),
@@ -507,7 +529,9 @@ export const register: Register = on => {
       read($, receipt),
       read($, log),
       read($, turn),
+      read($, layout),
     ])
+    const lay = cleanLayout(lay0)
     const now = await $.clock.now()
     // A session whose start was missed still has a current task to show.
     const list = list0.length > 0 ? list0 : [newTask('Unlabelled', now)]
@@ -703,6 +727,31 @@ export const register: Register = on => {
     ]
     // The title folds away the stats row (cost, running for, active, requests); Session totals keeps cost and requests.
     const vitalsOpen = !isOpen(VITALS_FOLDED)
+    const settingsOpen = isOpen(SETTINGS_OPEN)
+    // The warning line takes the memory index's colour when that is what is over; else orange.
+    const warnColor: BarColor = memColor === 'error' || memColor === 'warning' ? memColor : 'warning'
+    const titleOf = (id: string) => SECTIONS.find(x => x.id === id)?.title ?? id
+    const chipItems = lay.order.map(id => ({ id, title: titleOf(id), isShown: !lay.hidden.includes(id) }))
+    // Dragging needs a Client; a surface without one (mobile) moves a section up a place by its arrow.
+    const Client = 'Client' in ui ? ui.Client : undefined
+    const chips = Client ? (
+      <Client key={CHIPS} module="./chips.tsx" props={{ items: chipItems }} height={chipItems.length} />
+    ) : (
+      <Box key="chips" flexDirection="column">
+        {chipItems.map((it, i) => (
+          <Box key={it.id} flexDirection="row" gap={1}>
+            <Button key={`chip-${it.id}`} plain onPress={() => void update($, layout, l => applyLayoutMessage(cleanLayout(l), { toggle: it.id })).then(l => $.store.set(LAYOUT, l)).catch(() => undefined)}>
+              <Text dimColor={!it.isShown}>{`${it.isShown ? '☑' : '☐'} ${it.title}`}</Text>
+            </Button>
+            {i > 0 && (
+              <Button key={`up-${it.id}`} plain onPress={() => void update($, layout, l => applyLayoutMessage(cleanLayout(l), { move: { id: it.id, to: i - 1 } })).then(l => $.store.set(LAYOUT, l)).catch(() => undefined)}>
+                <Text dimColor>↑</Text>
+              </Button>
+            )}
+          </Box>
+        ))}
+      </Box>
+    )
     const vitalsCard = (
       <Box key="vitals" flexDirection="column" borderStyle="round" borderColor="claude" paddingX={1} gap={1}>
         <Box key="title" flexDirection="row" flexWrap="wrap" columnGap={2} justifyContent="space-between">
@@ -757,10 +806,26 @@ export const register: Register = on => {
             })}
           </Box>
         )}
-        {cacheWarnings.length > 0 && (
-          <Text key="cache-warn" color="warning" wrap="wrap">
-            {`⚠ Cache: ${cacheWarnings.join(' · ')}. See Cache health.`}
-          </Text>
+        <Box key="foot" flexDirection="row" gap={1} alignItems="flex-end" justifyContent="flex-end">
+          {cacheWarnings.length > 0 && (
+            <Box flexGrow={1} flexShrink={1} minWidth={0}>
+              <Text key="cache-warn" color={warnColor} size="footnote" wrap="wrap">
+                <Text size="body">⚠</Text>
+                {` Cache: ${cacheWarnings.join(' · ')}. See Cache health.`}
+              </Text>
+            </Box>
+          )}
+          <Button key="settings" plain onPress={() => void flip(SETTINGS_OPEN)}>
+            <Text color={settingsOpen ? 'claude' : undefined} dimColor={!settingsOpen} size="footnote">
+              ⚙
+            </Text>
+          </Button>
+        </Box>
+        {settingsOpen && (
+          <Box key="settings-body" flexDirection="column" gap={1}>
+            {heading('sh', 'SECTIONS · TICK TO SHOW · DRAG TO MOVE')}
+            {chips}
+          </Box>
         )}
       </Box>
     )
@@ -1150,18 +1215,21 @@ export const register: Register = on => {
       await update($, copied, () => (r.isCopied ? `Copied ${what}.` : `Copy failed (${r.reason}).`))
     }
     const errorsNow = lines.filter(l => l.kind === 'error').length
+    const byId: Record<string, () => ReturnType<typeof section>> = {
+      session: () => section('session', 'Session totals', `${usd(v.costUsd ?? total.usd)} · ${k(weighted(total))} weighted`, sessionBody),
+      tasks: () => section('tasks', 'Tasks', `${shownTasks.length} · now: ${last?.label ?? '—'}`, tasksBody),
+      requests: () => section('requests', 'Recent requests', `${log0.length} seen`, requestsBody),
+      agents: () => section('agents', 'Sub-agents', cards.length === 0 ? 'none' : `${running} running · ${cards.length} total`, agentsBody),
+      gate: () => section('gate', 'Permissions', `${gt.allowed} ok · ${gt.asked} asked · ${gt.denied} denied`, gateBody),
+      cache: () => section('cache', 'Cache health', ch ? `start ${k(ch.first)} · ${ch.rebuildCount} rebuild${ch.rebuildCount === 1 ? '' : 's'}` : '—', cacheBody),
+      turn: () => section('turn', 'Last turn', rc ? `${dur(rc.durationMs)}${rc.costDelta !== null ? ` · +${usd(rc.costDelta)}` : ''}` : '—', turnBody),
+      log: () => section('log', 'Activity', errorsNow > 0 ? `${lines.length} events · ${errorsNow} errors` : `${lines.length} events`, logBody),
+    }
 
     return (
       <Box flexDirection="column" gap={1}>
         {vitalsCard}
-        {section('session', 'Session totals', `${usd(v.costUsd ?? total.usd)} · ${k(weighted(total))} weighted`, sessionBody)}
-        {section('tasks', 'Tasks', `${shownTasks.length} · now: ${last?.label ?? '—'}`, tasksBody)}
-        {section('requests', 'Recent requests', `${log0.length} seen`, requestsBody)}
-        {section('agents', 'Sub-agents', cards.length === 0 ? 'none' : `${running} running · ${cards.length} total`, agentsBody)}
-        {section('gate', 'Permissions', `${gt.allowed} ok · ${gt.asked} asked · ${gt.denied} denied`, gateBody)}
-        {section('cache', 'Cache health', ch ? `start ${k(ch.first)} · ${ch.rebuildCount} rebuild${ch.rebuildCount === 1 ? '' : 's'}` : '—', cacheBody)}
-        {section('turn', 'Last turn', rc ? `${dur(rc.durationMs)}${rc.costDelta !== null ? ` · +${usd(rc.costDelta)}` : ''}` : '—', turnBody)}
-        {section('log', 'Activity', errorsNow > 0 ? `${lines.length} events · ${errorsNow} errors` : `${lines.length} events`, logBody)}
+        {lay.order.filter(id => !lay.hidden.includes(id)).map(id => byId[id]?.())}
         <Box key="actions" flexDirection="row" flexWrap="wrap" gap={1} alignItems="center">
           <Button key="copy-summary" label="Copy tasks (CSV)" onPress={p => void copy('the task summary', summaryCsv(list, factor), p.surface)} />
           <Button key="copy-calls" label={`Copy ${log0.length} requests (CSV)`} onPress={p => void copy('the request log', callsCsv(log0, factor), p.surface)} />
