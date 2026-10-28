@@ -378,6 +378,7 @@ export const paint = <T>(node: T, t: Theme, isRoot = true): T => {
     props.hover = h2
   }
   const out: Record<string, unknown> = { ...n, props }
-  if (Array.isArray(n.children)) out.children = n.children.map(c => paint(c, t, false))
+  if (n.children !== undefined) out.children = paint(n.children, t, false)
+  if (props.children !== undefined) props.children = paint(props.children, t, false)
   return out as T
 }

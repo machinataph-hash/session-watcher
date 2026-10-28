@@ -695,7 +695,7 @@ export const register: Register = on => {
     // Three across (Cache health) take a third each, with the spare cells between them.
     const stat3 = isNarrow ? inner : Math.max(1, Math.floor((inner - 4) / 3))
     const stat = (key: string, label: string, value: string, opts: { color?: 'claude' | 'error' | 'warning' | 'success'; sub?: string; w?: number } = {}) => (
-      <Box key={key} flexDirection="column" width={opts.w ?? statW} flexShrink={0}>
+      <Box key={key} flexDirection="column" width={opts.w ?? statW} flexGrow={1} flexShrink={0}>
         {heading('l', label)}
         <Text size="heading" weight="semibold" bold tabular color={opts.color} wrap="truncate-end">
           {value}
@@ -859,7 +859,7 @@ export const register: Register = on => {
               </Box>
               <Box key="themes" flexDirection="column" flexShrink={0}>
                 {heading('th', 'THEME')}
-                {[{ id: null as string | null, name: 'App colours' }, ...Object.entries(THEMES).map(([id, t]) => ({ id: id as string | null, name: t.name }))].map(o => {
+                {[{ id: null as string | null, name: 'Original' }, ...Object.entries(THEMES).map(([id, t]) => ({ id: id as string | null, name: t.name }))].map(o => {
                   const isOn = (lay.theme ?? null) === o.id
                   return (
                     <Button key={`theme-${o.id ?? 'app'}`} plain onPress={() => void setLayout({ theme: o.id })}>

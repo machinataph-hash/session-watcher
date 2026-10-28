@@ -317,3 +317,9 @@ test('paint: root gets the theme background, plain text the theme ink', () => {
   expect(out.props.backgroundColor).toBe(t.bg)
   expect(out.children[0].props.color).toBe(t.muted)
 })
+
+test('paint: reaches children kept in props, nested lists included', () => {
+  const t = THEMES.reader!
+  const out = paint({ type: 'Box', props: { children: [[{ type: 'Text', props: { children: 'x' } }]] } } as never, t) as any
+  expect(out.props.children[0][0].props.color).toBe(t.fg)
+})
