@@ -92,6 +92,7 @@ const SETTINGS_OPEN = 'settings-open'
 const layout = atom({ plugin: 'session-watcher', key: 'layout' } as const, defaultLayout() as Layout)
 const LAYOUT = 'layout'
 const CHIPS = 'section-chips'
+const OPTIONS = 'settings-options'
 // Tasks whose open state differs from their default (the current task starts open, earlier ones closed).
 const taskToggles = atom({ plugin: 'session-watcher', key: 'taskToggles' } as const, [] as number[])
 const copied = atom({ plugin: 'session-watcher', key: 'copied' } as const, '')
@@ -233,10 +234,15 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // The section chips post a tick or a move; the new layout is saved for later sessions.
+  // The section chips post a tick or a move, the Settings choices a pick; the new layout is saved for later sessions.
   on('ui.message', async ($, e, next) => {
-    if (e.element !== CHIPS) return next(e)
-    const l = await update($, layout, l0 => applyLayoutMessage(cleanLayout(l0), e.data))
+    // The Settings choices post the id of the row pressed: the Cache health bar flag or a theme.
+    const isOption = String(e.element).startsWith(OPTIONS)
+    if (e.element !== CHIPS && !isOption) return next(e)
+    const pick = (e.data as { pick?: unknown } | undefined)?.pick
+    if (isOption && typeof pick !== 'string') return {}
+    const msg = isOption ? (pick === 'cacheBar' ? { flag: 'cacheBar' } : { theme: pick === 'app' ? null : pick }) : e.data
+    const l = await update($, layout, l0 => applyLayoutMessage(cleanLayout(l0), msg))
     await $.store.set(LAYOUT, l).catch(() => undefined)
     return {}
   })
@@ -742,8 +748,12 @@ export const register: Register = on => {
     const chipItems = lay.order.map(id => ({ id, title: titleOf(id), isShown: !lay.hidden.includes(id) }))
     // Dragging needs a Client; a surface without one (mobile) moves a section up a place by its arrow.
     const Client = 'Client' in ui ? ui.Client : undefined
+    const palette = theme ? { palette: { bg: theme.card, fg: theme.fg, muted: theme.muted, accent: theme.keys.claude ?? theme.fg } } : {}
+    const themeChoices = [{ id: 'app', name: 'Original' }, ...Object.entries(THEMES).map(([id, t]) => ({ id, name: t.name }))]
+    const options = (key: string, items: { id: string; mark: string; label: string; isOn: boolean }[]) =>
+      Client ? <Client key={key} module="./options.tsx" props={{ items, ...palette }} height={items.length} /> : null
     const chips = Client ? (
-      <Client key={CHIPS} module="./chips.tsx" props={{ items: chipItems, ...(theme ? { palette: { bg: theme.card, fg: theme.fg, muted: theme.muted, accent: theme.keys.claude ?? theme.fg } } : {}) }} height={chipItems.length} />
+      <Client key={CHIPS} module="./chips.tsx" props={{ items: chipItems, ...palette }} height={chipItems.length} />
     ) : (
       <Box key="chips" flexDirection="column">
         {chipItems.map((it, i) => (
@@ -855,16 +865,19 @@ export const register: Register = on => {
                 {chips}
                 {/* A desktop Button draws its label in the app's own ink, not the theme's, so only the box is
                     the Button and the label is plain Text, as in the section list. */}
-                <Box key="cache-bar-row" flexDirection="row">
+                {options(`${OPTIONS}-cache`, [{ id: 'cacheBar', mark: lay.hideCacheBar ? '☐' : '☑', label: 'Cache health bar in this card', isOn: !lay.hideCacheBar }]) ?? <Box key="cache-bar-row" flexDirection="row">
                   <Button key="cache-bar-flag" plain onPress={() => void setLayout({ flag: 'cacheBar' })}>
                     <Text color={lay.hideCacheBar ? undefined : 'claude'} dimColor={lay.hideCacheBar}>{lay.hideCacheBar ? '☐' : '☑'}</Text>
                   </Button>
                   <Text dimColor={lay.hideCacheBar}>  Cache health bar in this card</Text>
-                </Box>
+                </Box>}
               </Box>
               <Box key="themes" flexDirection="column" flexShrink={0}>
                 {heading('th', 'THEME')}
-                {[{ id: null as string | null, name: 'Original' }, ...Object.entries(THEMES).map(([id, t]) => ({ id: id as string | null, name: t.name }))].map(o => {
+                {options(`${OPTIONS}-theme`, themeChoices.map(o => {
+                  const isOn = (lay.theme ?? 'app') === o.id
+                  return { id: o.id, mark: isOn ? '◉' : '○', label: o.name, isOn }
+                })) ?? [{ id: null as string | null, name: 'Original' }, ...Object.entries(THEMES).map(([id, t]) => ({ id: id as string | null, name: t.name }))].map(o => {
                   const isOn = (lay.theme ?? null) === o.id
                   return (
                     <Box key={`theme-row-${o.id ?? 'app'}`} flexDirection="row">

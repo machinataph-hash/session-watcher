@@ -1,5 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 import Chips from './chips'
+import Options from './options'
 import { applyLayoutMessage, breakdownText, cleanLayout, defaultLayout, emptyLimitModel, estimateLimit, fromModel, paint, THEMES, stepLimitModel, usdOf, weighted } from './core'
 
 const pane = { title: '', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} } as const
@@ -265,13 +266,13 @@ for (const surface of ['terminal', 'desktop'] as const)
     expect(await ui.find({ type: 'Text', text: /SECTIONS · TICK/ })).toBeDefined()
     // Untick Tasks (row 1): its section goes, its chip stays.
     expect(await ui.find({ type: 'Text', text: /^Tasks$/ })).toBeDefined()
-    await ui.pointer({ type: 'down', x: 0, y: 1, button: 'left' })
-    await ui.pointer({ type: 'up', x: 0, y: 1, button: 'left' })
+    await ui.pointer({ type: 'down', x: 0, y: 1, button: 'left', in: 'section-chips' })
+    await ui.pointer({ type: 'up', x: 0, y: 1, button: 'left', in: 'section-chips' })
     expect(await ui.find({ key: 'sec-tasks' })).toBeUndefined()
     // Drag Activity (row 7) to the top.
-    await ui.pointer({ type: 'down', x: 6, y: 7, button: 'left' })
-    await ui.pointer({ type: 'move', x: 6, y: 0, button: 'left' })
-    await ui.pointer({ type: 'up', x: 6, y: 0, button: 'left' })
+    await ui.pointer({ type: 'down', x: 6, y: 7, button: 'left', in: 'section-chips' })
+    await ui.pointer({ type: 'move', x: 6, y: 0, button: 'left', in: 'section-chips' })
+    await ui.pointer({ type: 'up', x: 6, y: 0, button: 'left', in: 'section-chips' })
     const keys = (await ui.findAll({ type: 'Button' })).map(b => (b as { key?: string }).key).filter(x => x?.startsWith('sec-') && x !== 'sec-vitals')
     expect(keys[0]).toBe('sec-log')
     expect(keys).not.toContain('sec-tasks')
@@ -280,6 +281,21 @@ for (const surface of ['terminal', 'desktop'] as const)
     await ui.press({ key: 'settings' })
     expect(await ui.find({ type: 'Text', text: /SECTIONS · TICK/ })).toBeUndefined()
   })
+
+// The theme choices and the Cache health bar flag are drawn on their own surface; a press on a row picks it.
+test('desktop: a press on a theme row picks that theme, and it is saved', async ($, on) => {
+  mock.clock(on)
+  mock.store(on)
+  await start($, on)
+  const ui = await mount($, 'desktop')
+  await ui.press({ key: 'settings' })
+  // Rows: Original, Frostwerk, Reader.
+  await ui.pointer({ type: 'down', x: 4, y: 2, button: 'left', in: 'settings-options-theme' })
+  const on_ = async (key: string) => ((await ui.find({ key })) as any)?.props?.props?.items.filter((i: any) => i.isOn).map((i: any) => i.id)
+  expect(await on_('settings-options-theme')).toEqual(['reader'])
+  await ui.pointer({ type: 'down', x: 4, y: 0, button: 'left', in: 'settings-options-cache' })
+  expect(await on_('settings-options-cache')).toEqual([])
+})
 
 test('a stored layout is cleaned: unknown ids dropped, new sections added last', () => {
   expect(cleanLayout({ order: ['log', 'nope', 'log', 'tasks'], hidden: ['x', 'gate'] })).toEqual({
@@ -336,6 +352,16 @@ test('chips: in every theme, text is drawn in a colour unlike its background', (
     walk(n.props?.children, here, out)
   }
   for (const t of Object.values(THEMES)) {
+    const surface0 = { elements: { Box: el('Box'), Text: el('Text') }, state: null, setState() {}, onPointer() {}, post() {} }
+    const choices = [{ id: 'app', mark: '○', label: 'Original', isOn: false }, { id: 'reader', mark: '◉', label: 'Reader', isOn: true }]
+    const optTexts: { color: unknown; bg: unknown }[] = []
+    walk((Options as any)({ items: choices, palette: { bg: t.card, fg: t.fg, muted: t.muted, accent: t.keys.claude } }, surface0), undefined, optTexts)
+    expect(optTexts.length).toBe(4)
+    for (const x of optTexts) {
+      expect(typeof x.color).toBe('string')
+      expect(x.bg).toBe(t.card)
+      expect(x.color).not.toBe(x.bg)
+    }
     const surface = { elements: { Box: el('Box'), Text: el('Text') }, state: null, setState() {}, onPointer() {}, post() {} }
     const items = [{ id: 'a', title: 'A', isShown: true }, { id: 'b', title: 'B', isShown: false }]
     const tree = (Chips as any)({ items, palette: { bg: t.card, fg: t.fg, muted: t.muted, accent: t.keys.claude } }, surface)
