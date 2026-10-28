@@ -375,3 +375,41 @@ test('chips: in every theme, text is drawn in a colour unlike its background', (
     }
   }
 })
+
+// The theme rule: in every theme, no text is drawn in its background's colour. A desktop Button keeps
+// the app's ink, so under a theme no Button may hold text; clickable titles are drawn on their own surface.
+for (const id of Object.keys(THEMES))
+  test(`desktop, ${id}: no text in the background's colour, and no Button holds text`, async ($, on) => {
+    const t = THEMES[id]!
+    mock.clock(on)
+    mock.store(on, { layout: { theme: id } })
+    await start($, on)
+    const ui = await mount($, 'desktop')
+    await ui.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: 'press:sec:settings-open' })
+    expect(await ui.find({ key: 'settings-options-theme' })).toBeDefined()
+    const bgs = [t.bg, t.card]
+    // Only labelled chrome Buttons (Copy CSV) remain, and they draw no Text of ours.
+    const buttons = await ui.findAll({ type: 'Button' })
+    for (const b of buttons) {
+      expect({ key: (b as any).key, label: typeof (b as any).props?.label, children: ((b as any).children ?? []).length })
+        .toEqual({ key: (b as any).key, label: 'string', children: 0 })
+    }
+    // A task header is pressable too, and the press reaches its handler.
+    const task = (await ui.findAll({ type: 'Client' })).map(c => String((c as any).key)).find(k => k.startsWith('press:task:'))
+    expect(task).toBeDefined()
+    await ui.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: task! })
+    for (const x of await ui.findAll({ type: 'Text' })) {
+      const c = (x as any).props?.color
+      expect(typeof c).toBe('string')
+      expect(bgs).not.toContain(c)
+    }
+    for (const c of await ui.findAll({ type: 'Client' })) {
+      const p = (c as any).props?.props
+      const colours: string[] = [
+        ...(p.runs ?? []).map((r: any) => r.color),
+        ...(p.palette ? [p.palette.fg, p.palette.muted, p.palette.accent] : []),
+      ]
+      for (const col of colours) expect([p.bg ?? p.palette?.bg]).not.toContain(col)
+      expect(p.bg ?? p.palette?.bg).toBe(t.card)
+    }
+  })

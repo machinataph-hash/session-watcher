@@ -93,6 +93,8 @@ const layout = atom({ plugin: 'session-watcher', key: 'layout' } as const, defau
 const LAYOUT = 'layout'
 const CHIPS = 'section-chips'
 const OPTIONS = 'settings-options'
+// A pressable title drawn on its own surface: press:sec:<section id> or press:task:<startedAt>.
+const PRESS = 'press:'
 // Tasks whose open state differs from their default (the current task starts open, earlier ones closed).
 const taskToggles = atom({ plugin: 'session-watcher', key: 'taskToggles' } as const, [] as number[])
 const copied = atom({ plugin: 'session-watcher', key: 'copied' } as const, '')
@@ -237,7 +239,17 @@ export const register: Register = on => {
   // The section chips post a tick or a move, the Settings choices a pick; the new layout is saved for later sessions.
   on('ui.message', async ($, e, next) => {
     // The Settings choices post the id of the row pressed: the Cache health bar flag or a theme.
-    const isOption = String(e.element).startsWith(OPTIONS)
+    const el = String(e.element)
+    if (el.startsWith(PRESS)) {
+      const [kind, id] = [el.slice(PRESS.length, el.indexOf(':', PRESS.length)), el.slice(el.indexOf(':', PRESS.length) + 1)]
+      if (kind === 'sec') await update($, sections, l => (l.includes(id) ? l.filter(x => x !== id) : [...l, id]))
+      else if (kind === 'task') {
+        const at = Number(id)
+        await update($, taskToggles, l => (l.includes(at) ? l.filter(x => x !== at) : [...l, at].slice(-60)))
+      }
+      return {}
+    }
+    const isOption = el.startsWith(OPTIONS)
     if (e.element !== CHIPS && !isOption) return next(e)
     const pick = (e.data as { pick?: unknown } | undefined)?.pick
     if (isOption && typeof pick !== 'string') return {}
@@ -665,6 +677,22 @@ export const register: Register = on => {
 
     const isOpen = (id: string) => open.includes(id)
     const flip = (id: string) => update($, sections, l => (l.includes(id) ? l.filter(x => x !== id) : [...l, id]))
+    // A clickable title. Under a theme on a surface with Clients it is drawn on its own surface in
+    // the theme's colours (a Button would keep the app's ink); otherwise it is a plain Button.
+    type R = { text: string; color?: string; dim?: boolean; bold?: boolean; size?: string }
+    // width: a fixed width for a short control (the cog); titles fill the row they sit in.
+    const pressable = (key: string, runs: R[], onPress: () => void, width?: number) => {
+      const Client = 'Client' in ui ? ui.Client : undefined
+      if (theme && Client) {
+        const ink = (r: R) => (r.color ? (theme.keys[r.color] ?? r.color) : r.dim ? theme.muted : theme.fg)
+        return <Client key={key} {...(width ? { width } : {})} module="./press.tsx" props={{ bg: theme.card, runs: runs.map(r => ({ text: r.text, color: ink(r), ...(r.bold ? { bold: true } : {}) })) }} height={1} />
+      }
+      return (
+        <Button key={key} plain onPress={onPress}>
+          {runs.map((r, i) => <Text key={`r${i}`} color={r.color} dimColor={r.dim} bold={r.bold} size={r.size as never}>{r.text}</Text>)}
+        </Button>
+      )
+    }
 
     // One collapsible section: a header row that opens and closes it, a one-line summary while closed.
     const section = (id: string, title: string, summary: string, body: () => unknown, accent = false) => {
@@ -673,12 +701,7 @@ export const register: Register = on => {
         <Box key={id} flexDirection="column" borderStyle="round" borderColor={accent ? 'claude' : undefined} borderDimColor={!accent} paddingX={1} gap={o ? 1 : 0} hover={{ borderDimColor: false }}>
           <Box key="head" flexDirection="row" gap={1} alignItems="center">
             <Box flexGrow={1} flexShrink={1} minWidth={0}>
-              <Button key={`sec-${id}`} plain onPress={() => void flip(id)}>
-                <Text dimColor>{o ? '▾ ' : '▸ '}</Text>
-                <Text bold color={accent ? 'claude' : undefined}>
-                  {title}
-                </Text>
-              </Button>
+              {pressable(theme ? `${PRESS}sec:${id}` : `sec-${id}`, [{ text: o ? '▾ ' : '▸ ', dim: true }, { text: title, bold: true, color: accent ? 'claude' : undefined }], () => void flip(id))}
             </Box>
             {summary !== '' && (
               <Box flexShrink={1} minWidth={0}>
@@ -774,14 +797,12 @@ export const register: Register = on => {
       <Box key="vitals" flexDirection="column" borderStyle="round" borderColor="claude" paddingX={1} gap={1}>
         <Box key="title" flexDirection="row" flexWrap="wrap" columnGap={2} justifyContent="space-between">
           <Box flexGrow={1} flexShrink={1} minWidth={0}>
-          <Button key="sec-vitals" plain onPress={() => void flip(VITALS_FOLDED)}>
-            <Text bold wrap="truncate-end">
-              <Text color={v.isRunning ? 'claude' : 'success'}>● </Text>
-              {v.model ? modelName(v.model) : 'Session'}
-              {v.effort ? <Text dimColor>{` · ${v.effort}`}</Text> : ''}
-              {v.mode ? <Text dimColor>{` · ${v.mode}`}</Text> : ''}
-            </Text>
-          </Button>
+          {pressable(theme ? `${PRESS}sec:${VITALS_FOLDED}` : 'sec-vitals', [
+            { text: '● ', color: v.isRunning ? 'claude' : 'success', bold: true },
+            { text: v.model ? modelName(v.model) : 'Session', bold: true },
+            ...(v.effort ? [{ text: ` · ${v.effort}`, dim: true }] : []),
+            ...(v.mode ? [{ text: ` · ${v.mode}`, dim: true }] : []),
+          ], () => void flip(VITALS_FOLDED))}
           </Box>
           <Text dimColor tabular>
             {v.isRunning ? 'working' : 'idle'}
@@ -850,11 +871,7 @@ export const register: Register = on => {
               </Text>
             </Box>
           )}
-          <Button key="settings" plain onPress={() => void flip(SETTINGS_OPEN)}>
-            <Text color={settingsOpen ? 'claude' : undefined} dimColor={!settingsOpen} size="title">
-              ⚙
-            </Text>
-          </Button>
+          {pressable(theme ? `${PRESS}sec:${SETTINGS_OPEN}` : 'settings', [{ text: '⚙', color: settingsOpen ? 'claude' : undefined, dim: !settingsOpen, size: 'title' }], () => void flip(SETTINGS_OPEN), 2)}
         </Box>
         {settingsOpen && (
           <Box key="settings-body" flexDirection="column" gap={1}>
@@ -1035,13 +1052,11 @@ export const register: Register = on => {
         <Box key={`task-${t.startedAt}`} flexDirection="column" borderStyle="round" borderColor={isNow ? 'claude' : undefined} borderDimColor={!isNow} paddingX={1} gap={o ? 1 : 0}>
           <Box key="head" flexDirection="row" gap={1} alignItems="center">
             <Box flexGrow={1} flexShrink={1} minWidth={0}>
-              <Button key={`open-${t.startedAt}`} plain onPress={() => void toggleTask(t)}>
-                <Text dimColor>{o ? '▾ ' : '▸ '}</Text>
-                <Text bold color={isNow ? 'claude' : undefined}>
-                  {t.label}
-                </Text>
-                {isNow ? <Text dimColor>  now</Text> : ''}
-              </Button>
+              {pressable(theme ? `${PRESS}task:${t.startedAt}` : `open-${t.startedAt}`, [
+                { text: o ? '▾ ' : '▸ ', dim: true },
+                { text: t.label, bold: true, color: isNow ? 'claude' : undefined },
+                ...(isNow ? [{ text: '  now', dim: true }] : []),
+              ], () => void toggleTask(t))}
             </Box>
             {!isNarrow && (
               <Text dimColor tabular>
