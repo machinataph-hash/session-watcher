@@ -25,8 +25,11 @@ paths = glob.glob(os.path.join(home, 'projects', '*', sid + '.jsonl'))
 if not paths:
     print(json.dumps({'missing': True}))
     sys.exit(0)
-main_path = paths[0]
-agent_paths = glob.glob(os.path.join(main_path[:-len('.jsonl')], 'subagents', '*.jsonl'))
+# A session whose working directory moved has a transcript in each project folder it used; every line is read once.
+paths.sort(key=os.path.getmtime)
+main_path = paths[-1]
+agent_paths = [a for p in paths for a in glob.glob(os.path.join(p[:-len('.jsonl')], 'subagents', '*.jsonl'))]
+seen_lines = set()
 
 FIELDS = (('input', 'input_tokens'), ('cacheWrite', 'cache_creation_input_tokens'),
           ('cacheRead', 'cache_read_input_tokens'), ('output', 'output_tokens'))
@@ -60,6 +63,11 @@ def read(path, is_agent, events):
                 o = json.loads(line)
             except ValueError:
                 continue
+            uid = o.get('uuid')
+            if uid:
+                if uid in seen_lines:
+                    continue
+                seen_lines.add(uid)
             msg = o.get('message') or {}
             if not is_agent and (o.get('isCompactSummary') or o.get('subtype') == 'compact_boundary'):
                 at = stamp(o)
@@ -101,7 +109,8 @@ def read(path, is_agent, events):
 
 
 events = []
-read(main_path, False, events)
+for p in paths:
+    read(p, False, events)
 for p in agent_paths:
     read(p, True, None)
 

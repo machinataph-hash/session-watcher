@@ -53,3 +53,12 @@ check('main write with no split counts as one-hour, split capped at the write',
       m['main']['cacheWrite1h'], 60000 + 500 + 10 + 70000)
 check('sub-agent write with no split counts as five-minute', m['agents']['cacheWrite1h'], 0)
 check('rebuild labels', [r['why'] for r in d['cache']['rebuilds']], ['start', 'idle'])
+
+# A session whose working directory moved: a transcript in each project folder, the second repeating the first's lines.
+home = tempfile.mkdtemp()
+for p, lines in (('p1', [resp('a', T0, inp=5)]), ('p2', [resp('a', T0, inp=5), resp('b', T0 + 1000, inp=7)])):
+    os.makedirs(os.path.join(home, 'projects', p))
+    with open(os.path.join(home, 'projects', p, 'sid.jsonl'), 'w') as f:
+        f.write('\n'.join(json.dumps(o, separators=(',', ':')) for o in lines))
+out = subprocess.run([sys.executable, '-I', os.path.join(HERE, 'scan.py'), 'sid'], capture_output=True, text=True, env={**os.environ, 'CLAUDE_CONFIG_DIR': home})
+check('every project folder is read, each request once', json.loads(out.stdout)['byModel']['claude-opus-5-5']['main']['calls'], 2)

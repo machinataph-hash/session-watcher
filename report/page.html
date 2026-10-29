@@ -1,0 +1,408 @@
+<title>Session Watcher</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* The pane on the desktop surface: the app's adaptive colours (Original), cards in a column, one cell = 1ch. */
+:root {
+  --bg: #fbfaf8; --card: #ffffff; --fg: #1f1e1c; --muted: #6e6b66; --border: #dcd9d3;
+  --claude: #c2572f; --suggestion: #3b78c4; --success: #2a8a43; --warning: #b5761a; --error: #c23b3b;
+  --text: #6b6b6b; --merged: #8e5bd6; --bashBorder: #c94a8a; --planMode: #23968a; --inactive: #a8a8a8; --permission: #6c73e0;
+  --track: rgba(138,138,138,.18); --rule: rgba(138,138,138,.45);
+  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #1d1c1a; --card: #262522; --fg: #ecebe8; --muted: #a29e97; --border: #3d3b37;
+  --claude: #e0794f; --suggestion: #6ea6ef; --success: #4cbf6a; --warning: #e5a443; --error: #ec6a6a;
+  --text: #a8a8a8; --merged: #a985e6; --bashBorder: #ea6fae; --planMode: #3cb8aa; --inactive: #7d7d7d; --permission: #8f95f5;
+  color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #1d1c1a; --card: #262522; --fg: #ecebe8; --muted: #a29e97; --border: #3d3b37;
+  --claude: #e0794f; --suggestion: #6ea6ef; --success: #4cbf6a; --warning: #e5a443; --error: #ec6a6a;
+  --text: #a8a8a8; --merged: #a985e6; --bashBorder: #ea6fae; --planMode: #3cb8aa; --inactive: #7d7d7d; --permission: #8f95f5;
+  color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font: 13px/1.45 var(--font); }
+#sw { max-width: 760px; margin: 0 auto; padding-block: 16px 32px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: flex; flex-direction: column; gap: 1.45em; }
+#sw.themed { background: var(--bg); }
+.top { display: flex; flex-wrap: wrap; gap: 1ch; align-items: baseline; justify-content: space-between; }
+.top .src { color: var(--muted); font-size: 11px; }
+.card { border: 1px solid var(--border); background: var(--card); padding: 4px 1ch; display: flex; flex-direction: column; min-width: 0; border-radius: 4px; }
+.card.open { gap: 1.45em; }
+.row { display: flex; flex-direction: row; gap: 1ch; align-items: center; min-width: 0; }
+.col { display: flex; flex-direction: column; min-width: 0; }
+.gap { gap: 1.45em; }
+.grow { flex: 1 1 0; min-width: 0; }
+.trunc { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dim { color: var(--muted); }
+.b { font-weight: 600; }
+.h { font-weight: 700; color: var(--muted); text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.foot { font-size: 11px; }
+.num { font-variant-numeric: tabular-nums; }
+.mono { font-family: var(--mono); }
+.big { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+button.p > span { white-space: pre; }
+button.p { all: unset; cursor: pointer; display: inline-flex; gap: 0; align-items: baseline; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-radius: 3px; }
+button.p:focus-visible, button.btn:focus-visible { outline: 2px solid var(--claude); outline-offset: 2px; }
+button.btn { font: inherit; color: var(--fg); background: transparent; border: 1px solid var(--border); border-radius: 5px; padding: 2px 10px; cursor: pointer; }
+button.btn:hover, button.p:hover { color: var(--claude); }
+.cog { font-size: 16px; line-height: 1; font-weight: 700; }
+.bar { height: 8px; border-radius: 4px; background: var(--track); overflow: hidden; display: flex; flex: 1 1 0; min-width: 0; }
+.bar > i { display: block; height: 100%; }
+.barrow { height: 1.45em; display: flex; align-items: center; }
+.rule { height: 1px; background: var(--rule); margin: .7em 0; }
+.sw8 { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+.cell { flex: 0 0 auto; display: flex; min-width: 0; }
+.r { justify-content: flex-end; text-align: right; }
+.gridrow { display: flex; gap: 2ch; }
+.gridrow > div { flex: 1 1 0; min-width: 0; }
+.ind { padding-left: 1ch; }
+.warn { font-size: 11px; }
+.note-sample { color: var(--warning); font-size: 11px; }
+</style>
+<div id="sw" aria-live="polite"></div>
+<script>var SW=(()=>{var c=Object.defineProperty;var O=Object.getOwnPropertyDescriptor;var A=Object.getOwnPropertyNames;var L=Object.prototype.hasOwnProperty;var v=(e,t)=>{for(var n in t)c(e,n,{get:t[n],enumerable:!0})},E=(e,t,n,r)=>{if(t&&typeof t=="object"||typeof t=="function")for(let s of A(t))!L.call(e,s)&&s!==n&&c(e,s,{get:()=>t[s],enumerable:!(r=O(t,s))||r.enumerable});return e};var W=e=>E(c({},"__esModule",{value:!0}),e);var B={};v(B,{BUCKETS:()=>S,EXTRAS:()=>C,SECTIONS:()=>l,TARGETS:()=>$,THEMES:()=>R,clock:()=>x,dur:()=>w,empty:()=>i,familyOf:()=>m,fresh:()=>p,hhmm:()=>T,k:()=>b,modelName:()=>k,newTask:()=>u,scanTotal:()=>h,sum:()=>a,taskTotal:()=>f,untilReset:()=>_,usd:()=>y,weighted:()=>g,when:()=>M,writeCost:()=>d});var i=()=>({input:0,cacheWrite:0,cacheWrite1h:0,cacheRead:0,output:0,calls:0,usd:0}),u=(e,t)=>({label:e,startedAt:t,main:{id:"main",who:"main thread",type:"main",models:[],usage:i()},agents:[]});var m=e=>/(fable|mythos|opus|sonnet|haiku)/i.exec(e)?.[1]?.toLowerCase()??"other";var d=e=>{let t=Math.min(e.cacheWrite1h??0,e.cacheWrite);return(e.cacheWrite-t)*1.25+t*2};var a=(e,t)=>({input:e.input+t.input,cacheWrite:e.cacheWrite+t.cacheWrite,cacheWrite1h:(e.cacheWrite1h??0)+(t.cacheWrite1h??0),cacheRead:e.cacheRead+t.cacheRead,output:e.output+t.output,calls:e.calls+t.calls,usd:e.usd+t.usd}),p=e=>e.input+e.cacheWrite+e.output,g=e=>e.input+d(e)+e.cacheRead*.1+e.output*5;var f=e=>e.agents.reduce((t,n)=>a(t,n.usage),e.main.usage);var h=e=>Object.values(e.byModel).reduce((t,n)=>a(a(t,n.main),n.agents),i());var k=e=>{let t=/(fable|mythos|opus|sonnet|haiku)-(\d+)(?:-(\d{1,2})(?!\d))?/i.exec(e);if(!t)return e.replace(/^claude-/,"");let[,n="",r="",s]=t;return`${n.charAt(0).toUpperCase()}${n.slice(1).toLowerCase()} ${r}${s?"."+s:""}`},b=e=>e>=1e9?(e/1e9).toFixed(2)+"B":e>=1e6?(e/1e6).toFixed(2)+"M":e>=1e4?Math.round(e/1e3)+"k":e>=1e3?(e/1e3).toFixed(1)+"k":String(Math.round(e)),y=e=>e>=100?`$${Math.round(e)}`:e>=1?`$${e.toFixed(2)}`:e>0?`$${e.toFixed(3)}`:"$0",o=e=>String(e).padStart(2,"0"),x=e=>{let t=Math.max(0,Math.floor(e/1e3)),n=Math.floor(t/86400),r=Math.floor(t%86400/3600),s=`${o(Math.floor(t%3600/60))}:${o(t%60)}`;return n>0?`${n}d ${o(r)}:${s}`:`${r}:${s}`},w=e=>{if(e<1e3)return`${Math.round(e)}ms`;let t=Math.round(e/1e3);return t<60?`${t}s`:t<3600?`${Math.floor(t/60)}m ${o(t%60)}s`:`${Math.floor(t/3600)}h ${o(Math.floor(t%3600/60))}m`},_=e=>{let t=Math.round(e/6e4);return t<60?`${t}m`:t<1440?`${Math.floor(t/60)}h ${o(t%60)}m`:`${Math.floor(t/1440)}d ${Math.floor(t%1440/60)}h`},U=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"],M=e=>{let t=new Date(e);return`${U[t.getMonth()]} ${t.getDate()}, ${o(t.getHours())}:${o(t.getMinutes())}`},T=e=>{let t=new Date(e);return`${o(t.getHours())}:${o(t.getMinutes())}`};var S=["file","shell","web","agent","other"];var l=[{id:"session",title:"Session Totals"},{id:"tasks",title:"Tasks"},{id:"requests",title:"Recent Requests"},{id:"agents",title:"Sub-Agents"},{id:"gate",title:"Permissions"},{id:"cache",title:"Cache"},{id:"turn",title:"Last Turn"},{id:"log",title:"Activity"}],N=l.map(e=>e.id);var $=[{id:"memGood",label:"Memory index: good to",value:4200,step:200,min:200},{id:"memFine",label:"Memory index: fine to",value:5800,step:200,min:400},{id:"memBar",label:"Memory index: bar width",value:1e4,step:1e3,min:1e3},{id:"ctxWarn",label:"Context: orange from %",value:65,step:5,min:5},{id:"ctxBad",label:"Context: red from %",value:85,step:5,min:10},{id:"limWarn",label:"Plan limits: orange from %",value:60,step:5,min:5},{id:"limBad",label:"Plan limits: red from %",value:85,step:5,min:10},{id:"turnMax",label:"Requests per turn: limit",value:15,step:1,min:1}];var C={vitals:[{key:"active",label:"Active time and its share",isOn:!1},{key:"ttft",label:"First-token time",isOn:!1}],session:[{key:"tokens",label:"Token counts and weight",isOn:!0},{key:"csv",label:"Copy as CSV buttons",isOn:!0}],tasks:[{key:"hint",label:"How tasks work",isOn:!0},{key:"kinds",label:"Cost by kind in each task",isOn:!0}],requests:[{key:"tokens",label:"Token columns",isOn:!0}],agents:[{key:"breakdown",label:"Cost by type and model",isOn:!1},{key:"finished",label:"Finished sub-agents",isOn:!0}],gate:[{key:"recent",label:"Latest checks",isOn:!0}],cache:[{key:"tools",label:"Largest tool results",isOn:!0},{key:"rebuilds",label:"Rebuild list",isOn:!0}],turn:[{key:"requests",label:"Requests this turn",isOn:!0}],log:[{key:"info",label:"Info lines (off: errors and done only)",isOn:!0}]};var R={frostwerk:{name:"Frostwerk",bg:"#02060d",card:"#070e17",fg:"#e8ebef",muted:"#848d98",border:"#2b333f",keys:{claude:"#00c2e8",suggestion:"#00c2e8",success:"#4bc98f",warning:"#fb7c00",error:"#ee5f5d",text:"#b9d3db",merged:"#9e91e4",bashBorder:"#fb7c00",planMode:"#7d97b3",inactive:"#848d98",permission:"#9e91e4"}},reader:{name:"Reader",bg:"#efe8db",card:"#f7f3ea",fg:"#2f2c28",muted:"#655e52",border:"#cdc2ae",keys:{claude:"#46545c",suggestion:"#46545c",success:"#4b6a3c",warning:"#8a5a1f",error:"#a1463a",text:"#5e584f",merged:"#7a5e86",bashBorder:"#a1463a",planMode:"#456865",inactive:"#6f6759",permission:"#585d84"}}};return W(B);})();
+</script>
+<script id="state" type="application/json">__STATE__</script>
+<script>
+(() => {
+const S = JSON.parse(document.getElementById('state').textContent)
+const { k, usd, clock, dur, hhmm, when, untilReset, modelName, familyOf, weighted, writeCost, fresh, sum, empty, taskTotal, scanTotal, newTask, EXTRAS, SECTIONS, TARGETS, THEMES, BUCKETS } = SW
+const root = document.getElementById('sw')
+// Per-viewer settings, as the pane keeps them in $.state: open sections, layout (order, hidden, theme, extras).
+const KEY = 'session-watcher:v1'
+const load = () => { try { return JSON.parse(localStorage.getItem(KEY) || 'null') } catch { return null } }
+const saved = load() || {}
+let open = saved.open || ['session', 'tasks']
+let lay = Object.assign({ order: S.order || SECTIONS.map(s => s.id), hidden: S.hidden || [], cards: {} }, saved.lay || {})
+for (const s of SECTIONS) if (!lay.order.includes(s.id)) lay.order.push(s.id)
+let toggles = saved.toggles || []
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify({ open, lay, toggles })) } catch {} }
+const isOpen = id => open.includes(id)
+const flip = id => { open = isOpen(id) ? open.filter(x => x !== id) : [...open, id]; save(); draw() }
+const extrasOf = card => Object.fromEntries((EXTRAS[card] || []).map(d => [d.key, (lay.cards[card] || {})[d.key] ?? d.isOn]))
+const tg = Object.fromEntries(TARGETS.map(d => [d.id, d.value]))
+
+// ---- tiny element helper
+const h = (tag, attrs, ...kids) => {
+  const el = document.createElement(tag)
+  for (const [a, v] of Object.entries(attrs || {})) {
+    if (v === undefined || v === null || v === false) continue
+    if (a === 'class') el.className = v
+    else if (a === 'style') el.style.cssText = v
+    else if (a.startsWith('on')) el.addEventListener(a.slice(2), v)
+    else el.setAttribute(a, v)
+  }
+  for (const c of kids.flat(Infinity)) if (c !== null && c !== undefined && c !== false) el.append(c instanceof Node ? c : document.createTextNode(String(c)))
+  return el
+}
+const T = (text, cls = '', color) => h('span', { class: cls, style: color ? `color:var(--${color})` : undefined }, text)
+const heading = text => h('div', { class: 'h' }, text)
+const n = (v, o = {}) => T(v, `num foot ${o.bold ? 'b' : ''} ${o.dim ? 'dim' : ''}`, o.color)
+const cellW = (w, node, right = true) => h('div', { class: `cell ${right ? 'r' : ''}`, style: `width:${w}ch` }, node)
+const NUM_W = 8, STAT_MIN = 16, GROUP_MIN = 24, COL_GAP = 2, KIND_W = 11
+
+let inner = 60
+// DESIGN 9: label/value row.
+const labelValue = (label, note, value) => h('div', { class: 'row', style: 'justify-content:space-between' },
+  h('div', { class: 'grow' }, heading(label)),
+  h('div', { class: 'row', style: 'flex:0 0 auto' }, note ? T(note, 'num dim') : null, value ? T(value.text, 'num b', value.color) : null))
+// Bars: a continuous bar, one part per value; with a track, the rest is the dim track.
+const strip = (parts, track) => {
+  const tot = track ? 1 : parts.reduce((a, p) => a + p.value, 0) || 1
+  return h('div', { class: 'bar', role: 'img', 'aria-label': parts.map(p => `${p.color} ${Math.round(p.value * 100) / 100}`).join(', ') },
+    parts.map(p => h('i', { style: `width:${Math.max(0, Math.min(100, (100 * p.value) / tot))}%;background:var(--${p.color})` })))
+}
+const barRow = parts => h('div', { class: 'barrow' }, strip(parts, true))
+const swatch = color => h('span', { class: 'sw8', style: `background:var(--${color})` })
+const rule = () => h('div', { class: 'rule', role: 'separator' })
+// DESIGN 6: equal columns wall to wall, the most that fit at `min`, stepping down one at a time; short rows padded.
+const grid = (items0, min, cols) => {
+  const items = items0.filter(Boolean)
+  const target = Math.max(cols ?? items.length, items.length)
+  const fits = c => c * min + (c - 1) * COL_GAP <= inner
+  const per = Array.from({ length: target }, (_, i) => target - i).find(fits) ?? 1
+  const rows = []
+  for (let i = 0; i < items.length; i += per) rows.push(items.slice(i, i + per))
+  return h('div', { class: 'col gap' }, rows.map(r => h('div', { class: 'gridrow' }, [...r, ...Array(per - r.length).fill(null)].map(it => h('div', {}, it)))))
+}
+const stat = (label, value, o = {}) => h('div', { class: 'col' }, heading(label), T(value, 'big', o.color), o.sub ? T(o.sub, 'foot dim num trunc') : null)
+const stats = (items, cols) => grid(items, STAT_MIN, cols)
+// DESIGN 7: one column list for header and rows; free column grows; numbers 8 wide, right-aligned; stacks when narrow.
+const table = (cols0, rows, room = inner, after) => {
+  const cols = cols0.filter(Boolean)
+  const min = 10 + cols.filter(c => c.kind !== 'free').reduce((a, c) => a + (c.kind === 'num' ? NUM_W : c.w ?? NUM_W) + 1, 0)
+  const box = (c, node) => c.kind === 'free' ? h('div', { class: 'grow trunc' }, node) : cellW(c.kind === 'num' ? NUM_W : c.w ?? NUM_W, node, c.kind === 'num')
+  if (room >= min) return h('div', { class: 'col' },
+    h('div', { class: 'row' }, cols.map(c => box(c, c.kind === 'mark' ? null : heading(c.label)))),
+    rows.map(r => h('div', { class: 'row' }, cols.map(c => box(c, r[c.id] ?? null)))), after || null)
+  return h('div', { class: 'col gap' }, rows.map(r => h('div', { class: 'col' },
+    cols.filter(c => c.kind === 'free').map(c => h('div', { class: 'trunc' }, r[c.id])),
+    cols.filter(c => c.kind === 'num' || c.kind === 'text').map(c => h('div', { class: 'row', style: 'justify-content:space-between' }, T(c.label, 'dim trunc'), h('div', {}, r[c.id]))))), after || null)
+}
+const pressable = (runs, onPress, label) => h('button', { class: 'p', onclick: onPress, 'aria-label': label },
+  runs.map(r => h('span', { class: `${r.bold ? 'b' : ''} ${r.dim ? 'dim' : ''} ${r.mono ? 'mono' : ''} ${r.cls || ''}`, style: r.color ? `color:var(--${r.color})` : undefined }, r.text)))
+const arrowRun = on => ({ text: on ? '▾ ' : '▸ ', dim: true })
+const tickRun = on => ({ text: on ? '☑' : '☐', color: on ? 'claude' : undefined, dim: !on, bold: on, mono: true })
+const cog = (on, onPress) => pressable([{ text: '⚙', color: on ? 'claude' : undefined, cls: 'cog' }], onPress, 'Card settings')
+const extraTicks = card => h('div', { class: 'col ind' }, (EXTRAS[card] || []).map(d => {
+  const on = extrasOf(card)[d.key]
+  return pressable([tickRun(on), { text: `  ${d.label}`, dim: !on }], () => { lay.cards[card] = { ...(lay.cards[card] || {}), [d.key]: !on }; save(); draw() })
+}))
+// THE CARD TEMPLATE (DESIGN 2).
+const card = o => h('section', { class: `card ${o.isOpen || o.isMenuOpen ? 'open' : ''}`, id: o.id },
+  h('div', { class: 'row' }, h('div', { class: 'grow' }, o.title), o.summary ? h('div', { class: 'trunc dim num', style: 'flex:0 1 auto' }, o.summary) : null, o.onCog ? h('div', { style: 'flex:0 0 auto' }, cog(o.isMenuOpen, o.onCog)) : null),
+  o.isMenuOpen ? h('div', { class: 'col' }, rule(), h('div', { class: 'col gap' }, o.items), rule()) : null,
+  o.isOpen && o.body ? h('div', { class: 'col gap' }, o.body()) : null)
+const section = (id, title, summary, body, more) => {
+  const hasMenu = (EXTRAS[id] || []).length > 0 || !!more
+  return card({ id, title: pressable([arrowRun(isOpen(id)), { text: title, bold: true }], () => flip(id)), summary,
+    onCog: hasMenu ? () => flip(`menu:${id}`) : undefined, isMenuOpen: hasMenu && isOpen(`menu:${id}`),
+    items: [(EXTRAS[id] || []).length ? heading('Show in this card') : null, (EXTRAS[id] || []).length ? extraTicks(id) : null, more ? more() : null],
+    isOpen: isOpen(id), body })
+}
+
+function draw() {
+  // Cells across: the card's inner width in the body face's `ch`.
+  const probe = h('span', { style: 'position:absolute;visibility:hidden' }, '0'.repeat(100)); document.body.append(probe)
+  const ch = probe.getBoundingClientRect().width / 100 || 7; probe.remove()
+  const cols = Math.max(28, Math.floor((root.clientWidth || 600) / ch) - 2)
+  inner = cols - 4
+  const isWide = inner >= 50, isNarrow = cols < 40
+  const theme = lay.theme ? THEMES[lay.theme] : undefined
+  if (theme) {
+    const s = document.documentElement.style
+    for (const [a, b] of [['bg', theme.bg], ['card', theme.card], ['fg', theme.fg], ['muted', theme.muted], ['border', theme.border]]) s.setProperty(`--${a}`, b)
+    for (const [a, b] of Object.entries(theme.keys)) s.setProperty(`--${a}`, b)
+    document.documentElement.style.colorScheme = theme.name === 'Reader' ? 'light' : 'dark'
+  } else document.documentElement.removeAttribute('style')
+
+  const now = S.exportedAt, sc = S.scan, v = S.vitals, list = S.tasks.length ? S.tasks : [newTask('Unlabelled', now)]
+  const callList = S.calls, cards = S.agents, g = S.gate, rc = S.receipt, events = S.log, ch0 = sc.cache
+  const startedAt = S.sessionStart
+  const hasScan = Object.keys(sc.byModel).length > 0
+  const total = hasScan ? scanTotal(sc) : list.reduce((a, t) => sum(a, taskTotal(t)), empty())
+  const snapCost = hasScan && sc.costUsd != null ? sc.costUsd : (v.costUsd ?? total.usd)
+  const f0 = total.usd > 0 ? snapCost / total.usd : 1, factor = Number.isFinite(f0) && f0 > 0 ? f0 : 1
+  const isCalibrated = sc.costUsd != null && total.usd > 0
+  const perReq = (cost, c) => (c > 0 ? usd(cost / c) : '—')
+  const mainU = Object.values(sc.byModel).reduce((a, x) => sum(a, x.main), empty())
+  const agentU = Object.values(sc.byModel).reduce((a, x) => sum(a, x.agents), empty())
+  const mainCost = mainU.usd * factor, agentCost = hasScan ? Math.max(0, snapCost - mainCost) : agentU.usd * factor
+  const agentCount = new Set([...list.flatMap(t => t.agents.map(a => a.id)), ...cards.map(c => c.id)]).size
+  const inputAll = total.input + total.cacheWrite + total.cacheRead
+  const hitRate = inputAll > 0 ? total.cacheRead / inputAll : null
+  const FAMILY = { fable: 'merged', mythos: 'merged', opus: 'bashBorder', sonnet: 'planMode', haiku: 'inactive', other: 'permission' }
+  const whoColor = r => (r.type === 'main' ? 'text' : FAMILY[familyOf(r.models[0] || '')] || 'permission')
+  const KINDS = [
+    { field: 'input', name: 'input', cost: u => u.input, color: 'success' },
+    { field: 'cacheWrite', name: 'cache write', cost: writeCost, color: 'warning' },
+    { field: 'cacheRead', name: 'cache read', cost: u => u.cacheRead * 0.1, color: 'error' },
+    { field: 'output', name: 'output', cost: u => u.output * 5, color: 'claude' },
+  ]
+
+  // ---- Main card
+  const ctxMax = v.ctxLimit > 0 ? v.ctxLimit : v.ctxWindow
+  const ctxPct = v.ctxTokens !== null && ctxMax > 0 ? Math.round((100 * v.ctxTokens) / ctxMax) : v.ctxLimit > 0 ? null : v.ctxPct
+  const ctxColor = ctxPct === null ? 'inactive' : ctxPct >= tg.ctxBad ? 'error' : ctxPct >= tg.ctxWarn ? 'warning' : 'success'
+  const runFor = now - startedAt, actMs = S.active.hist + S.active.ms
+  const mainEx = extrasOf('vitals')
+  const memColor = !ch0 || ch0.memoryChars === null ? 'inactive' : ch0.memoryChars > tg.memFine ? 'error' : ch0.memoryChars > tg.memGood ? 'warning' : 'success'
+  const memWord = memColor === 'error' ? 'Bad' : memColor === 'warning' ? 'Fine' : 'Good'
+  const settingsOpen = isOpen('settings-open'), vitalsOpen = !isOpen('vitals-folded')
+  const allIds = [...lay.order, ...Object.keys(EXTRAS).map(id => `menu:${id}`)]
+  const allOpen = allIds.every(id => open.includes(id))
+  const titleOf = id => SECTIONS.find(x => x.id === id)?.title ?? id
+  const LABEL_W = isNarrow ? 8 : 13
+  const meterRow = (label, value, color, shown, note) => h('div', { class: 'row' },
+    h('div', { class: 'cell', style: `width:${LABEL_W}ch` }, T(label, 'dim trunc')), strip([{ value, color }], true), cellW(8, shown), isNarrow ? null : cellW(10, T(note, 'dim num foot trunc')))
+  const group = (label, note, body) => h('div', { class: 'col gap' }, h('div', { class: 'col' }, heading(label), T(note, 'foot dim')), body)
+  const chips = h('div', { class: 'col' }, lay.order.map((id, i) => {
+    const shown = !lay.hidden.includes(id)
+    return h('div', { class: 'row ind', style: 'gap:0' },
+      h('div', { class: 'cell', style: 'width:3ch' }, i > 0 ? pressable([{ text: '↑', dim: true }], () => { lay.order = lay.order.filter(x => x !== id); lay.order.splice(i - 1, 0, id); save(); draw() }, `Move ${titleOf(id)} up`) : null),
+      pressable([tickRun(shown), { text: `  ${titleOf(id)}`, dim: !shown }], () => { lay.hidden = shown ? [...lay.hidden, id] : lay.hidden.filter(x => x !== id); save(); draw() }))
+  }))
+  const themeChoices = [{ id: 'app', name: 'Original' }, ...Object.entries(THEMES).map(([id, t]) => ({ id, name: t.name }))]
+  const vitalsCard = card({ id: 'main',
+    title: pressable([{ text: '● ', color: v.isRunning ? 'claude' : 'success', bold: true }, { text: v.model ? modelName(v.model) : 'Session', bold: true }, ...(v.effort ? [{ text: ` · ${v.effort}`, dim: true }] : []), ...(v.mode ? [{ text: ` · ${v.mode}`, dim: true }] : [])], () => flip('vitals-folded')),
+    summary: `${v.isRunning ? 'working' : 'idle'}${mainEx.ttft ? ` · first token ${v.ttftMs != null ? dur(v.ttftMs) : '—'}` : ''}`,
+    onCog: () => flip('settings-open'), isMenuOpen: settingsOpen,
+    items: [
+      h('div', { class: 'row' }, h('button', { class: 'btn', onclick: () => { open = allOpen ? open.filter(x => !allIds.includes(x)) : [...new Set([...open, ...allIds])]; save(); draw() } }, allOpen ? 'Collapse all' : 'Open all')),
+      grid([
+        group('Cards', 'Tick to show, ↑ to move. Each card has its own ⚙ for its extras.', chips),
+        group('Main card', 'Extras shown in this card.', extraTicks('vitals')),
+        group('Theme', 'Colours for the whole page.', h('div', { class: 'col ind' }, themeChoices.map(o => {
+          const on = (lay.theme ?? 'app') === o.id
+          return pressable([tickRun(on), { text: `  ${o.name}`, dim: !on }], () => { lay.theme = o.id === 'app' ? undefined : o.id; save(); draw() })
+        }))),
+      ], GROUP_MIN),
+    ],
+    isOpen: true,
+    body: () => [
+      h('div', { class: 'col' },
+        labelValue(`Context${v.compactions > 0 ? ` · ⟲ ${v.compactions} compacted` : ''}`, v.ctxTokens !== null ? `${k(v.ctxTokens)}${ctxMax ? ` / ${k(ctxMax)}` : ''}` : '—', ctxPct !== null ? { text: `${ctxPct}%`, color: ctxColor } : undefined),
+        barRow([{ value: (ctxPct ?? 0) / 100, color: ctxColor }]),
+        ctxPct === null ? T('The window size comes from the live session; this copy was made without it.', 'foot dim') : null),
+      vitalsOpen && stats([
+        stat(v.costUsd !== null ? 'Cost' : 'Cost (est.)', usd(v.costUsd ?? total.usd), { color: 'claude' }),
+        stat('Running for', clock(runFor), { sub: `since ${when(startedAt)}` }),
+        mainEx.active ? stat('Active', clock(actMs), { sub: `${runFor > 0 ? Math.round((100 * actMs) / runFor) : 0}% of the time` }) : null,
+        stat('Requests', String(total.calls)),
+        stat('Cost / request', perReq(snapCost, total.calls)),
+      ]),
+      h('div', { class: 'col' }, (v.limits.length ? v.limits.slice(0, 3) : [{ kind: 'five_hour', pct: 0, resetsAt: null, none: true }, { kind: 'seven_day', pct: 0, resetsAt: null, none: true }]).map(l => meterRow(
+        l.kind === 'five_hour' ? '5-hour limit' : l.kind === 'seven_day' ? '7-day limit' : l.kind.replace(/_/g, ' '),
+        l.none ? 0 : (l.est ?? l.pct) / 100, l.pct >= tg.limBad ? 'error' : l.pct >= tg.limWarn ? 'warning' : 'suggestion',
+        n(l.none ? '—' : l.est != null ? `${l.est.toFixed(2)}%` : `${Math.round(l.pct)}%`, { bold: true }), l.resetsAt ? `↻ ${untilReset(Math.max(0, l.resetsAt - now))}` : ''))),
+    ],
+  })
+
+  // ---- token kinds
+  const kinds = (u, room = inner, withTokens = true, dollars) => {
+    const tokens = u.input + u.cacheWrite + u.cacheRead + u.output, cost = weighted(u)
+    const hasTokens = withTokens && room >= 44
+    return h('div', { class: 'col' },
+      h('div', { class: 'row' }, cellW(KIND_W, heading('Kind'), false), h('div', { class: 'grow' }, heading(room >= 40 ? 'Share of cost' : 'Share')), cellW(NUM_W, heading('Cost')), hasTokens ? cellW(NUM_W, heading('Tokens')) : null, hasTokens ? cellW(NUM_W, heading('%')) : null),
+      KINDS.map(kd => {
+        const share = tokens > 0 ? u[kd.field] / tokens : 0, cs = cost > 0 ? kd.cost(u) / cost : 0
+        return h('div', { class: 'row' }, cellW(KIND_W, T(kd.name, 'dim'), false), strip([{ value: cs, color: kd.color }], true),
+          cellW(NUM_W, n(dollars !== undefined ? usd(dollars * cs) : `${Math.round(100 * cs)}%`, { bold: true })),
+          hasTokens ? cellW(NUM_W, n(k(u[kd.field]), { dim: true })) : null, hasTokens ? cellW(NUM_W, n(`${Math.round(100 * share)}%`, { dim: true })) : null)
+      }))
+  }
+  const splitRow = parts => h('div', { class: 'barrow' }, strip(parts, false))
+
+  // ---- session totals
+  const byModel = Object.entries(sc.byModel).flatMap(([m, x]) => [
+    { id: `${m}-main`, who: 'Main thread', model: m, u: x.main, color: 'text' },
+    { id: `${m}-agents`, who: 'Sub-Agents', model: m, u: x.agents, color: FAMILY[familyOf(m)] || 'permission' },
+  ]).filter(r => r.u.calls > 0).sort((a, b) => b.u.usd - a.u.usd)
+  const sessEx = extrasOf('session')
+  const sessionBody = () => [
+    labelValue(`Total at ${hhmm(sc.at)}`, '', { text: usd(snapCost), color: 'claude' }),
+    hasScan && stats([stat('Main thread', usd(mainCost), { sub: `${perReq(mainCost, mainU.calls)} / request` }), stat('Sub-Agents', usd(agentCost), { sub: `${perReq(agentCost, agentU.calls)} / request` })], 3),
+    sessEx.tokens && stats([stat('Fresh', k(fresh(total)), { sub: 'input + write + output' }), stat('Cache read', k(total.cacheRead)), stat('Weighted', k(weighted(total)), { sub: 'tokens by price' })], 3),
+    kinds(total, inner, sessEx.tokens, hasScan ? snapCost : undefined),
+    byModel.length > 0 && table([
+      { id: 'sw', label: '', kind: 'mark', w: 1 }, { id: 'w', label: 'Who · model', kind: 'free' }, isWide && { id: 'c', label: 'Calls', kind: 'num' },
+      { id: 'o', label: 'Output', kind: 'num' }, sessEx.tokens && { id: 'wt', label: 'Weight', kind: 'num' }, { id: 'u', label: 'Cost', kind: 'num' },
+    ], byModel.map(r => ({ sw: swatch(r.color), w: h('span', {}, r.who, T(` · ${modelName(r.model)}`, 'dim')), c: n(String(r.u.calls), { dim: true }), o: n(k(r.u.output)), wt: n(`${Math.round((100 * weighted(r.u)) / (weighted(total) || 1))}%`, { dim: true }), u: n(usd(r.u.usd * factor), { bold: true }) })),
+      inner, splitRow(byModel.map(r => ({ value: r.u.usd, color: r.color })))),
+    T(`From the transcripts, main and every sub-agent, read at ${hhmm(sc.at)}. Rows add up to the total above.`, 'foot dim'),
+    sessEx.csv && h('div', { class: 'row', style: 'flex-wrap:wrap' },
+      h('button', { class: 'btn', onclick: ev => copy(ev, tasksCsv()) }, 'Copy tasks (CSV)'),
+      h('button', { class: 'btn', onclick: ev => copy(ev, callsCsv()) }, `Copy ${callList.length} requests (CSV)`), T('', 'foot dim copied')),
+  ]
+  const costNote = () => T(`Main card shows the live cost. This card shows the cost from the last log scan (as of ${hasScan ? hhmm(sc.at) : '—'}), which splits main thread and sub-agents. The gap is spend since that scan; it closes on the next scan.`, 'foot dim')
+
+  // ---- tasks
+  const taskEx = extrasOf('tasks')
+  const last = list.at(-1)
+  const shownTasks = list.filter(t => t === last || taskTotal(t).calls > 0).slice().reverse()
+  const taskOpen = t => (t === last) !== toggles.includes(t.startedAt)
+  const mins = t => Math.max(0, Math.round(((t.endedAt ?? now) - t.startedAt) / 60000))
+  const taskCard = t => {
+    const u = taskTotal(t), isNow = t === last, o = taskOpen(t)
+    const rows = [t.main, ...t.agents].filter(r => r.usage.calls > 0).sort((a, b) => b.usage.usd - a.usage.usd)
+    const tw = weighted(u) || 1
+    return h('div', { class: `card ${o ? 'open' : ''}` },
+      h('div', { class: 'row' }, h('div', { class: 'grow' }, pressable([arrowRun(o), { text: t.label, bold: true, color: isNow ? 'claude' : undefined }, ...(isNow ? [{ text: '  now', dim: true }] : [])], () => { toggles = toggles.includes(t.startedAt) ? toggles.filter(x => x !== t.startedAt) : [...toggles, t.startedAt].slice(-60); save(); draw() })),
+        isNarrow ? null : T(`${mins(t)} min · ${u.calls} calls`, 'dim num trunc'), cellW(NUM_W, n(usd(u.usd * factor), { bold: true, color: isNow ? 'claude' : undefined }))),
+      o ? (u.calls > 0 ? h('div', { class: 'col gap' }, taskEx.kinds && kinds(u, inner - 4),
+        table([{ id: 'sw', label: '', kind: 'mark', w: 1 }, { id: 'who', label: 'Who', kind: 'free' }, isWide && { id: 'm', label: 'Model', kind: 'text', w: 12 }, isWide && { id: 'c', label: 'Calls', kind: 'num' }, { id: 'w', label: 'Weight', kind: 'num' }, { id: 'u', label: 'Cost', kind: 'num' }],
+          rows.map(r => ({ sw: swatch(whoColor(r)), who: r.type === 'main' ? 'Main thread' : r.who, m: T(r.models.map(modelName).join(', '), 'dim'), c: n(String(r.usage.calls), { dim: true }), w: n(`${Math.round((100 * weighted(r.usage)) / tw)}%`, { dim: true }), u: n(usd(r.usage.usd * factor), { bold: true }) })),
+          inner - 4, splitRow(rows.map(r => ({ value: r.usage.usd, color: whoColor(r) })))))
+        : T('No calls yet.', 'dim')) : null)
+  }
+  const tasksBody = () => [taskEx.hint && T('A task runs from one mark_task to the next. Click a task to open or close it.', 'foot dim'), ...shownTasks.map(taskCard)]
+
+  // ---- recent requests
+  const recent = callList.slice(-15).reverse(), reqTok = extrasOf('requests').tokens
+  const requestsBody = () => recent.length === 0 ? [T('No requests yet.', 'dim')] : [table([
+    { id: 't', label: 'Time', kind: 'text', w: 5 }, { id: 'w', label: 'Who', kind: 'free' }, reqTok && isWide && { id: 'i', label: 'In+CW', kind: 'num' },
+    reqTok && !isNarrow && { id: 'r', label: 'C.Read', kind: 'num' }, reqTok && { id: 'o', label: 'Out', kind: 'num' }, { id: 'u', label: 'Cost', kind: 'num' },
+  ], recent.map(c => ({ t: T(hhmm(c.at), 'dim num'), w: h('span', {}, c.who === 'main thread' ? 'Main' : c.who, T(` · ${modelName(c.model)}`, 'dim')), i: n(k(c.input + c.cacheWrite)), r: n(k(c.cacheRead), { dim: true }), o: n(k(c.output)), u: n(usd(c.usd * factor), { bold: true }) })))]
+
+  // ---- sub-agents
+  const running = cards.filter(c => c.status === 'running').length
+  const agentCard = c => {
+    const color = c.status === 'running' ? 'claude' : c.status === 'done' ? 'success' : 'error'
+    return h('div', { class: 'card' },
+      h('div', { class: 'row' }, h('div', { class: 'grow trunc' }, T(c.status === 'running' ? '● ' : c.status === 'done' ? '✓ ' : '✗ ', '', color), T(c.description || c.type, 'b')), T(clock((c.endedAt ?? now) - c.spawnedAt), 'dim num')),
+      T(`${c.type} · ${modelName(c.model)} · ${c.steps} steps · ctx ${k(c.ctx)} · out ${k(c.out)}`, 'dim num trunc'),
+      c.lastTool ? T(`↳ ${c.lastTool}`, 'dim foot trunc') : null)
+  }
+  const agentsBody = () => [
+    stats([stat('Sub-Agents', String(agentCount), { sub: `${running} running` }), stat('Cost', usd(agentCost), { color: 'claude', sub: `${snapCost > 0 ? Math.round((100 * agentCost) / snapCost) : 0}% of ${usd(snapCost)}` }), stat('Cost / request', perReq(agentCost, agentU.calls), { sub: `${agentU.calls} requests` })]),
+    running === 0 ? T('None running.', 'dim') : null,
+    ...cards.filter(c => c.status === 'running').reverse().map(agentCard),
+    extrasOf('agents').finished && cards.some(c => c.status !== 'running') && h('div', { class: 'col' }, heading('Finished'), h('div', { class: 'col gap' }, cards.filter(c => c.status !== 'running').reverse().slice(0, 12).map(agentCard))),
+  ]
+
+  // ---- permissions (from the transcript: what ran and what was refused)
+  const gt = BUCKETS.reduce((a, b) => ({ allowed: a.allowed + g.totals[b].allowed, asked: a.asked + g.totals[b].asked, denied: a.denied + g.totals[b].denied }), { allowed: 0, asked: 0, denied: 0 })
+  const gateBody = () => [
+    table([{ id: 'k', label: 'Kind', kind: 'free' }, { id: 'a', label: 'Allowed', kind: 'num' }, { id: 'q', label: 'Asked', kind: 'num' }, { id: 'd', label: 'Denied', kind: 'num' }],
+      BUCKETS.filter(b => g.totals[b].allowed + g.totals[b].asked + g.totals[b].denied > 0).map(b => ({ k: b, a: n(String(g.totals[b].allowed), { color: 'success' }), q: n(String(g.totals[b].asked), { color: 'warning' }), d: n(String(g.totals[b].denied), { color: g.totals[b].denied > 0 ? 'error' : undefined, dim: g.totals[b].denied === 0 }) }))),
+    gt.allowed + gt.asked + gt.denied > 0 && h('div', { class: 'barrow' }, strip([{ value: gt.allowed, color: 'success' }, { value: gt.asked, color: 'warning' }, { value: gt.denied, color: 'error' }], false)),
+    extrasOf('gate').recent && g.recent.length > 0 && h('div', { class: 'col' }, heading('Latest checks'), g.recent.slice(-6).reverse().map(c => h('div', { class: 'trunc' }, T(c.verdict === 'denied' ? '✗ ' : '● ', '', c.verdict === 'allowed' ? 'success' : c.verdict === 'asked' ? 'warning' : 'error'), T(c.detail, 'dim')))),
+  ]
+
+  // ---- last turn
+  const turnBody = () => rc === null ? [T('No finished turn yet.', 'dim')] : [stats([
+    stat('Took', dur(rc.durationMs)), stat('Cost added', rc.costDelta !== null ? usd(rc.costDelta * factor) : '—', { color: 'claude' }),
+    stat('Tool calls', String(rc.tools), { sub: `${rc.edits} edit${rc.edits === 1 ? '' : 's'}` }),
+    stat('Errors', String(rc.errors), { color: rc.errors > 0 ? 'error' : undefined, sub: `${rc.agents} sub-agent${rc.agents === 1 ? '' : 's'}` }),
+    rc.cacheHit != null ? stat('Cache hit', `${Math.round(100 * rc.cacheHit)}%`, { sub: 'input from the cache' }) : null,
+    extrasOf('turn').requests ? stat('Requests', String(rc.requests), { color: rc.requests > tg.turnMax ? 'error' : undefined, sub: `limit ${tg.turnMax}` }) : null,
+  ])]
+
+  // ---- cache
+  const WHY = { start: 'session start', idle: 'idle over 1 hour', summary: 'after a summary', other: 'other' }
+  const toolName = name => { const p = name.split('__'); return p[0] === 'mcp' && p.length >= 3 ? p.slice(2).join('__') : name }
+  const cacheEx = extrasOf('cache')
+  const cacheBody = () => !ch0 ? [T('No cache data in the transcripts.', 'dim')] : [
+    stats([stat('Cache hit rate', hitRate !== null ? `${Math.round(100 * hitRate)}%` : '—', { color: 'claude', sub: 'input read from the cache' }), stat('Starting load', k(ch0.first), { sub: 'first request' }), stat('Rebuilds', String(ch0.rebuildCount), { sub: `${k(ch0.rebuildTokens)} written` })]),
+    ch0.memoryChars !== null && h('div', { class: 'col' }, labelValue('Memory index', `${ch0.memoryChars.toLocaleString('en-US')} / ${tg.memBar.toLocaleString('en-US')} chars`, { text: memWord, color: memColor }), barRow([{ value: Math.min(1, ch0.memoryChars / tg.memBar), color: memColor }])),
+    cacheEx.rebuilds && h('div', { class: 'col' }, heading('Rebuilds · requests writing over 50k'), ch0.rebuilds.length === 0 ? T('None.', 'dim') : ch0.rebuilds.slice(-5).reverse().map(r => h('div', { class: 'row' }, cellW(NUM_W, T(hhmm(r.at), 'dim num'), false), h('div', { class: 'grow trunc' }, WHY[r.why] || r.why), cellW(NUM_W, n(k(r.tokens)))))),
+    cacheEx.tools && h('div', { class: 'col' }, heading('Largest tool results · characters'), ch0.tools.length === 0 ? T('None yet.', 'dim') : ch0.tools.map(t => h('div', { class: 'row' }, h('div', { class: 'grow trunc' }, toolName(t.name)), cellW(NUM_W, n(k(t.chars)))))),
+  ]
+
+  // ---- activity
+  const shownEvents = extrasOf('log').info ? events : events.filter(l => l.kind !== 'info')
+  const logBody = () => shownEvents.length === 0 ? [T('Nothing yet.', 'dim')] : [h('div', { class: 'col' }, shownEvents.slice(-20).reverse().map(l => h('div', { class: 'row' },
+    cellW(NUM_W, T(hhmm(l.at), 'dim num'), false), isNarrow ? null : cellW(10, T(l.who, 'trunc', l.kind === 'error' ? 'error' : l.kind === 'done' ? 'success' : undefined), false),
+    h('div', { class: `grow trunc ${l.kind === 'info' ? 'dim' : ''}`, style: l.kind === 'error' ? 'color:var(--error)' : undefined }, l.text))))]
+
+  const errorsNow = events.filter(l => l.kind === 'error').length
+  const byId = {
+    session: () => section('session', 'Session Totals', hasScan ? `main ${usd(mainCost)} · agents ${usd(agentCost)}` : '—', sessionBody, costNote),
+    tasks: () => section('tasks', 'Tasks', `${shownTasks.length} · now: ${last?.label ?? '—'}`, tasksBody),
+    requests: () => section('requests', 'Recent Requests', `${callList.length} seen`, requestsBody),
+    agents: () => section('agents', 'Sub-Agents', agentCount === 0 ? 'none' : `${running} running`, agentsBody),
+    gate: () => section('gate', 'Permissions', `${gt.allowed} ok · ${gt.asked} asked · ${gt.denied} denied`, gateBody),
+    cache: () => section('cache', 'Cache', hitRate !== null ? `${Math.round(100 * hitRate)}% hit${ch0 && ch0.memoryChars !== null ? ` · ${memWord}` : ''}` : '—', cacheBody),
+    turn: () => section('turn', 'Last Turn', rc ? `${dur(rc.durationMs)}${rc.costDelta !== null ? ` · +${usd(rc.costDelta * factor)}` : ''}` : '—', turnBody),
+    log: () => section('log', 'Activity', errorsNow > 0 ? `${events.length} events · ${errorsNow} errors` : `${events.length} events`, logBody),
+  }
+  root.replaceChildren(
+    h('div', { class: 'top' }, T(`Updated ${when(now)}:${String(new Date(now).getSeconds()).padStart(2, '0')}`, 'b'), T('Published by the Session Watcher mod after each request.', 'src')),
+    vitalsCard,
+    ...lay.order.filter(id => !lay.hidden.includes(id)).map(id => byId[id]?.()),
+    T((isCalibrated ? 'Cost is Claude Code’s own total. Each row’s cost is its tokens at list price, scaled so the rows add up to that total.' : 'Cost is an estimate at list price until Claude Code reports the session cost.') + ' Cost per request = cost ÷ requests, both from the same transcript read. Weighted = input ×1 + cache write ×1.25 (five-minute cache) or ×2 (one-hour cache) + cache read ×0.1 + output ×5. Fresh = input + cache write + output.', 'foot dim'),
+  )
+
+  // CSV, as the pane's Copy buttons build it.
+  function tasksCsv() { return ['task,started,minutes,calls,input,cache_write,cache_read,output,usd', ...list.map(t => { const u = taskTotal(t); return [JSON.stringify(t.label), new Date(t.startedAt).toISOString(), mins(t), u.calls, u.input, u.cacheWrite, u.cacheRead, u.output, (u.usd * factor).toFixed(4)].join(',') })].join('\n') }
+  function callsCsv() { return ['time,task,who,model,input,cache_write,cache_read,output,usd', ...callList.map(c => [new Date(c.at).toISOString(), JSON.stringify(c.task), JSON.stringify(c.who), c.model, c.input, c.cacheWrite, c.cacheRead, c.output, (c.usd * factor).toFixed(4)].join(','))].join('\n') }
+}
+async function copy(ev, text) {
+  const note = root.querySelector('.copied')
+  try { await navigator.clipboard.writeText(text); if (note) note.textContent = 'Copied.' }
+  catch { if (note) note.textContent = 'Copy failed: your browser refused the clipboard.' }
+}
+draw()
+let w = root.clientWidth
+new ResizeObserver(() => { if (root.clientWidth !== w) { w = root.clientWidth; draw() } }).observe(root)
+})()
+</script>

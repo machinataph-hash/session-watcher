@@ -1,6 +1,6 @@
 # Session Watcher
 
-**A Claude Code mod that puts your session's cost, tokens and activity in one pane**: context and rate limits, Claude Code's own cost, token use for the whole session, per task and per request, your sub-agents, every permission check, and a log of what happened. Every number comes from a real session event or the session's own transcript, and nothing leaves your machine.
+**A Claude Code mod that puts your session's cost, tokens and activity in one pane**: context and rate limits, Claude Code's own cost, token use for the whole session, per task and per request, your sub-agents, every permission check, and a log of what happened. Every number comes from a real session event or the session's own transcript, and nothing leaves your machine except the live page it publishes to your own claude.ai account (`/session-watcher live off` stops it).
 
 It builds on the token-use mod and takes ideas from [Flightdeck](https://github.com/scasella/claude-flightdeck).
 
@@ -37,6 +37,9 @@ It needs `python3` on your PATH for the session totals and active time. Mods are
 | `/session-watcher` | open the pane |
 | `/session-watcher close` | close it |
 | `/session-watcher reset` | put every section back to its starting open or closed state |
+| `/session-watcher report` | publish the live page now |
+| `/session-watcher live on` / `off` | turn the live page on or off (on by default) |
+| `/session-watcher live 20` | publish at most every 20 seconds (the default; 5 at the least) |
 
 Click a section's title to open or close it. The top card is always shown. Session Totals and Tasks start open, and the rest start closed, so you choose what you see. The pane opens by itself when a session starts.
 
@@ -103,6 +106,14 @@ A second tool, `context_breakdown`, returns the context window broken down as `/
 - Session Totals update after each turn, so during a long turn they trail the live task count.
 - A sub-agent's context size is the whole input of its latest request.
 
+## Live page
+
+Session Watcher also publishes the pane as a private page on claude.ai, so you can follow a session where the pane can't be drawn, such as a cloud session in the desktop app. After each model request it writes its state into [`report/page.html`](report/page.html) and publishes it with the Artifact tool, at most once every 20 seconds; requests inside that wait are published when it ends, so the page never stays behind. The first publish puts the link in Activity and in a toast; later ones update the same page, and an open page picks up the update by itself.
+
+A publish is a tool call the mod makes itself, not a model request, so it costs no tokens. The page shows the same cards as the pane, drawn to [docs/DESIGN.md](docs/DESIGN.md), with the pane's own numbers: cost, context, rate limits, permissions and sub-agents. Which cards are open, their extras and the theme are kept in your browser. The page is private until you share it, and its Activity and Permissions cards show your prompts and commands.
+
+Change the page in `report/page.src.html` (or `hooks/core.ts`), then rebuild it with `node report/build.mjs`. `node --experimental-strip-types report/export.ts <session id> <folder>` rebuilds a session's state from its transcripts, for a page of a session that ran without the mod; `node report/build.mjs --preview <folder>/state.json` writes `report/preview.html` to look at.
+
 ## What it can reach
 
 Session Watcher only watches. Every hook passes its event on unchanged: it never denies, rewrites or delays a tool call, a prompt or a sub-agent. If its own bookkeeping fails, the event still passes through.
@@ -117,13 +128,15 @@ Session Watcher only watches. Every hook passes its event on unchanged: it never
 | context, cost and rate limits | `session.measure`, `$.session.usage()` |
 | runs `python3 hooks/scan.py`, which reads this session's own transcripts under `~/.claude/projects` | `$.process.run` |
 | copies CSV to your clipboard when you press a button | `$.ui.copy` |
+| writes the live page under `~/.claude/session-watcher/live/` and publishes it | `$.fs.write`, `$.tool.call` (Artifact) |
 
-What it keeps lives in session state and ends with the session. It makes **no** network requests, writes no files, and calls no model. Paths are shortened and anything that looks like a key or token is masked before it is shown. `claude plugin validate .` lists exactly what it hooks and calls.
+What it keeps lives in session state and ends with the session. It makes **no** network requests of its own and calls no model. The only file it writes is the live page, and the only tool it calls is Artifact to publish it; `/session-watcher live off` stops both. Paths are shortened and anything that looks like a key or token is masked before it is shown. `claude plugin validate .` lists exactly what it hooks and calls.
 
 ## Troubleshooting
 
 - **The pane doesn't open:** check `claude --version` is 2.1.308 or later, then run `/reload-plugins` and `/session-watcher`. Look in the transcript for a dim line starting `session-watcher:`; it names what failed.
 - **`/session-watcher` isn't in the `/` menu:** type it in full. Some surfaces list a mod's commands only after it has loaded.
+- **No live page link:** look in Activity for a `page` line. `publish failed` says why; the Artifact tool has to be available in the session.
 - **Session Totals stay at 0 or say "Reading the transcripts…":** check `python3` is installed and on your PATH.
 
 ## Files
@@ -134,7 +147,10 @@ What it keeps lives in session state and ends with the session. It makes **no** 
 | [`hooks/core.ts`](hooks/core.ts) | prices, sums and formatting, as plain functions |
 | [`hooks/scan.py`](hooks/scan.py) | reads the session's transcripts for totals and active time |
 | [`hooks/pane.test.tsx`](hooks/pane.test.tsx) | 48 tests: the section chips (hide, drag, a saved layout), each card's extras (stored only when changed, old fields dropped), the settings reflow at a narrow width, Session Totals adding up to one snapshot, the themes (kept, unknown ones dropped, every nested element painted), the limit estimator, drawing, opening and closing sections, folding the Main stats row (terminal and desktop), permission tallies, the context limit, cache-write pricing by cache length, the Cache card and its Main warning line (memory index, cache hit rate), every width from 24 to 120 columns on the terminal and the desktop, and the `context_breakdown` text |
-| [`hooks/scan_test.py`](hooks/scan_test.py) | `python3 -I hooks/scan_test.py`: transcript reading — one-hour writes when a response has no split, the cap at the write, empty placeholder lines skipped, two responses in the same millisecond, rebuild labels |
+| [`hooks/live.test.tsx`](hooks/live.test.tsx) | the live page: a request publishes the state, later ones wait for the interval and the last is not lost; off, report, and the kept setting |
+| [`hooks/scan_test.py`](hooks/scan_test.py) | `python3 -I hooks/scan_test.py`: transcript reading — one-hour writes when a response has no split, the cap at the write, empty placeholder lines skipped, two responses in the same millisecond, rebuild labels, a session whose transcripts sit in several project folders |
+| [`report/page.src.html`](report/page.src.html) | the live page; `report/build.mjs` bundles `core.ts` into [`report/page.html`](report/page.html) |
+| [`report/export.ts`](report/export.ts) | a session's state rebuilt from its transcripts, for a page without the mod |
 | [`types/index.d.ts`](types/index.d.ts) | the state contract |
 
 ## Develop

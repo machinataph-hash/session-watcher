@@ -243,6 +243,76 @@ const callsCsv = (list: Call[], factor: number) =>
     ...list.map(c => [iso(c.at), c.task, c.who, c.model, c.effort, c.input, c.cacheWrite, c.cacheRead, c.output, (c.usd * factor).toFixed(4)]),
   ])
 
+// ---- live page: the pane's state, published as a claude.ai page (report/page.html) after each request.
+// A publish is a tool call the mod makes itself, so it costs no model tokens. At most one per `everyS`; a request
+// inside that wait is published when it ends, so the page always catches up with the last one.
+type LiveCfg = { on: boolean; everyS: number }
+const LIVE = 'live'
+const LIVE_DEFAULT: LiveCfg = { on: true, everyS: 20 }
+const live = { cfg: LIVE_DEFAULT, last: 0, timer: null as { cancel: () => void } | null, isBusy: false, isDirty: false, path: '', url: '' }
+const isLiveCall = (tool: string, input: unknown) => tool === 'Artifact' && live.path !== '' && (input as { file_path?: unknown } | null)?.file_path === live.path
+
+const liveSnapshot = async ($: EngineInterface) => {
+  const [t, c, a, s, v, ag, g, r, l, lay] = await Promise.all([read($, tasks), read($, calls), read($, active), read($, scan), read($, vitals), read($, agents), read($, gate), read($, receipt), read($, log), read($, layout)])
+  const now = await $.clock.now()
+  return { exportedAt: now, sessionStart: sessionStart ?? t[0]?.startedAt ?? now, tasks: t, calls: c.slice(-500), active: { ...a, ms: activeMs(a, now) - (a.hist ?? 0), since: null }, scan: s, vitals: v, agents: ag, gate: g, receipt: r, log: l, order: lay.order, hidden: lay.hidden }
+}
+
+const publishLive = async ($: EngineInterface) => {
+  if (live.isBusy) {
+    live.isDirty = true
+    return
+  }
+  live.isBusy = true
+  try {
+    if (live.path === '') {
+      const home = (await $.process.run(['printenv', 'HOME'])).stdout.trim()
+      const id = await $.session.id()
+      if (!home || !id) return
+      live.path = `${home}/.claude/session-watcher/live/${id}/session-watcher.html`
+    }
+    const page = await $.fs.read(`${$.plugin.root}/report/page.html`)
+    const state = JSON.stringify(await liveSnapshot($)).replace(/</g, '\\u003c')
+    await $.fs.write(live.path, page.replace('__STATE__', () => state))
+    live.last = await $.clock.now()
+    const r = (await $.tool.call({
+      tool: 'Artifact',
+      file_path: live.path,
+      ...(live.url ? {} : { icon: 'gauge', description: 'Session Watcher, live: this session’s cost, tokens, cache and activity.' }),
+    } as never)) as { deny?: string; text?: string; isError?: boolean; result?: unknown }
+    const text = r.deny ?? r.text ?? (typeof r.result === 'string' ? r.result : JSON.stringify(r.result ?? ''))
+    const url = /https:\/\/claude\.ai\/(?:code\/)?artifact\/[\w-]+/.exec(text)?.[0]
+    if (r.deny !== undefined || r.isError) await say($, 'page', `publish failed · ${shorten(text, 60)}`, 'error')
+    else if (url && url !== live.url) {
+      live.url = url
+      await say($, 'page', `live at ${url}`, 'done')
+      $.ui.toast(`Session Watcher page: ${url}`)
+    }
+  } catch (err) {
+    await say($, 'page', `publish failed · ${shorten(String((err as Error)?.message ?? err), 60)}`, 'error').catch(() => undefined)
+  } finally {
+    live.isBusy = false
+    if (live.isDirty) {
+      live.isDirty = false
+      scheduleLive($)
+    }
+  }
+}
+
+// After a request: publish now if the last publish is old enough, else once the wait is over.
+const scheduleLive = ($: EngineInterface, isNow = false) => {
+  if (!live.cfg.on && !isNow) return
+  if (live.timer) return
+  void $.clock.now().then(now => {
+    const wait = isNow ? 0 : live.last + live.cfg.everyS * 1000 - now
+    if (wait <= 0) return void publishLive($)
+    live.timer = $.clock.after(wait, () => {
+      live.timer = null
+      void publishLive($)
+    })
+  })
+}
+
 // Each observing hook ends in .catch: if its own bookkeeping fails, the event passes on unchanged.
 export const register: Register = on => {
   // tool.check carries no agent id; the tool.call around it does.
@@ -250,7 +320,7 @@ export const register: Register = on => {
   let ticking = false
 
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: NAME, description: 'Session Watcher: session vitals, cost and token use', argumentHint: '[open|close|reset]' })
+    await $.command.register({ name: NAME, description: 'Session Watcher: session vitals, cost and token use', argumentHint: '[open|close|reset|report|live on|off|<seconds>]' })
     await $.tool.register({
       name: TOOL,
       description:
@@ -268,6 +338,8 @@ export const register: Register = on => {
     await update($, tasks, l => (l.length === 0 ? [newTask('Unlabelled', now)] : l))
     const saved = await $.store.get(LAYOUT).catch(() => undefined)
     if (saved !== undefined) await update($, layout, () => cleanLayout(saved))
+    const liveSaved = (await $.store.get(LIVE).catch(() => undefined)) as Partial<LiveCfg> | undefined
+    live.cfg = { ...LIVE_DEFAULT, ...(liveSaved ?? {}) }
     await readUsage($, true)
     void readTranscript($)
     if (!ticking) {
@@ -322,7 +394,18 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: NAME }, async ($, e) => {
-    const verb = e.args.trim().split(/\s+/)[0] || 'open'
+    const [verb = 'open', arg = ''] = e.args.trim().split(/\s+/).filter(Boolean)
+    if (verb === 'report') {
+      scheduleLive($, true)
+      return { text: live.url ? `Publishing Session Watcher to ${live.url}.` : 'Publishing Session Watcher; the link shows in Activity and as a toast.' }
+    }
+    if (verb === 'live') {
+      const s = Number(arg)
+      live.cfg = arg === 'off' ? { ...live.cfg, on: false } : arg === 'on' || arg === '' ? { ...live.cfg, on: true } : Number.isFinite(s) && s >= 5 ? { on: true, everyS: Math.round(s) } : live.cfg
+      await $.store.set(LIVE, live.cfg).catch(() => undefined)
+      if (live.cfg.on) scheduleLive($, true)
+      return { text: live.cfg.on ? `Live page on: published after each request, at most every ${live.cfg.everyS}s.${live.url ? ` ${live.url}` : ''}` : 'Live page off. /session-watcher report publishes once.' }
+    }
     if (verb === 'close') {
       await $.ui.close({ id: PANE })
       tickMs = 0
@@ -453,6 +536,7 @@ export const register: Register = on => {
       usd: u.usd,
     }
     await update($, calls, l => [...l, call].slice(-5000))
+    scheduleLive($)
     return result
   })
 
@@ -480,7 +564,8 @@ export const register: Register = on => {
 
   on('tool.check', async ($, e, next) => {
     const verdict = await next(e)
-    if (e.tool_use_id) {
+    // The live page's own publishes are not the session's work.
+    if (e.tool_use_id && !isLiveCall(e.tool, e.input)) {
       const check: Check = {
         at: await $.clock.now(),
         tool: e.tool,
@@ -498,6 +583,7 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   on('tool.call', async ($, e, next) => {
+    if (isLiveCall(e.tool, e)) return next(e)
     callAgent.set(e.tool_use_id, e.agentId ?? null)
     const ran = await next(e).finally(() => callAgent.delete(e.tool_use_id))
     const didRun = ran.deny === undefined
@@ -569,8 +655,8 @@ export const register: Register = on => {
       }))
       await update($, vitals, v => ({ ...v, isRunning: false }))
       await readUsage($)
-      // The turn's end is in the transcript now, so the whole session is read again.
-      void readTranscript($)
+      // The turn's end is in the transcript now, so the whole session is read again, then the live page follows.
+      void readTranscript($).then(() => scheduleLive($))
       return done
     }
     const card = (await read($, agents)).find(c => c.id === id)
