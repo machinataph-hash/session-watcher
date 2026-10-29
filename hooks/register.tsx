@@ -716,9 +716,10 @@ export const register: Register = on => {
     const isOpen = (id: string) => open.includes(id)
     const flip = (id: string) => update($, sections, l => (l.includes(id) ? l.filter(x => x !== id) : [...l, id]))
     type R = { text: string; color?: string; dim?: boolean; bold?: boolean; size?: string }
-    // A clickable title. With no theme, the surface's own Button. Under a theme on a surface with Clients,
+    // A clickable title. With no theme, the surface's own Button. Under a theme on a surface with Clients (not desktop),
     // its own one-line surface in the theme's colours, since a desktop Button keeps the app's ink.
-    const Client = 'Client' in ui ? ui.Client : undefined
+    // The desktop tears the whole pane down when a Client misses its 2000ms render answer, so desktop draws without them.
+    const Client = 'Client' in ui && e.surface !== 'desktop' ? ui.Client : undefined
     // Only a drawing that registers presses replaces them, so a terminal draw leaves a desktop pane's presses alone.
     if (theme && Client) pressActions.clear()
     const pressable = (key: string, runs: R[], onPress: () => void) => {
