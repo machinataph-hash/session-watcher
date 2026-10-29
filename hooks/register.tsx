@@ -741,7 +741,7 @@ export const register: Register = on => {
 
     const isOpen = (id: string) => open.includes(id)
     const flip = (id: string) => update($, sections, l => (l.includes(id) ? l.filter(x => x !== id) : [...l, id]))
-    // w: drawn in the monospaced face, so ☑ and ☐ (different widths in the app's own font) take the same room.
+    // w: drawn in the monospaced face, so [x] and [ ] (different widths in the app's own font) take the same room.
     type R = { text: string; color?: string; dim?: boolean; bold?: boolean; size?: string; w?: number }
     // A clickable title. With no theme, the surface's own Button. Under a theme on a surface with Clients (not desktop),
     // its own one-line surface in the theme's colours, since a desktop Button keeps the app's ink.
@@ -783,7 +783,7 @@ export const register: Register = on => {
         <Box key={`ticks-${card}`} flexDirection="column" paddingLeft={1}>
           {defs.map(d => {
             const isOn = ex[d.key] ?? d.isOn
-            return pressable(`x-${card}-${d.key}`, [{ text: isOn ? '☑' : '☐', color: isOn ? 'claude' : undefined, dim: !isOn, w: 3 }, { text: `  ${d.label}`, dim: !isOn }], () => setLayout({ extra: { card, key: d.key } }))
+            return pressable(`x-${card}-${d.key}`, [{ text: isOn ? '[x]' : '[ ]', color: isOn ? 'claude' : undefined, dim: !isOn, w: 3 }, { text: `  ${d.label}`, dim: !isOn }], () => setLayout({ extra: { card, key: d.key } }))
           })}
         </Box>
       )
@@ -792,6 +792,15 @@ export const register: Register = on => {
     const rule = (key: string) => (
       <Box key={key} height={1} overflow="hidden">
         <Text dimColor wrap="wrap">{'─'.repeat(Math.max(inner, 600))}</Text>
+      </Box>
+    )
+
+    // A card's settings menu, the same for every card: a divider directly above and below its items.
+    const menu = (key: string, items: unknown[]) => (
+      <Box key={key} flexDirection="column" gap={1}>
+        {rule('sep-top')}
+        {items as never}
+        {rule('sep-bottom')}
       </Box>
     )
 
@@ -814,15 +823,14 @@ export const register: Register = on => {
                 </Text>
               </Box>
             )}
-            {hasMenu && <Box key="cog" flexShrink={0}>{cog(`cfg-${id}`, m, () => void flip(`${MENU}${id}`), 'body')}</Box>}
+            {hasMenu && <Box key="cog" flexShrink={0}>{cog(`cfg-${id}`, m, () => void flip(`${MENU}${id}`))}</Box>}
           </Box>
           {m && (
-            <Box key="menu" flexDirection="column" gap={1}>
-              {(EXTRAS[id] ?? []).length > 0 && heading('mh', 'SHOW IN THIS CARD')}
-              {(EXTRAS[id] ?? []).length > 0 && extraTicks(id)}
-              {more?.() as never}
-              {rule('sep')}
-            </Box>
+            menu('menu', [
+              (EXTRAS[id] ?? []).length > 0 && heading('mh', 'SHOW IN THIS CARD'),
+              (EXTRAS[id] ?? []).length > 0 && extraTicks(id),
+              more?.(),
+            ])
           )}
           {o && (
             <Box key="body" flexDirection="column" gap={1}>
@@ -902,6 +910,10 @@ export const register: Register = on => {
     // The title folds away the stats row (cost, running for, requests, cost per request).
     const vitalsOpen = !isOpen(VITALS_FOLDED)
     const settingsOpen = isOpen(SETTINGS_OPEN)
+    // Open all / Collapse all: every card and every card's settings menu together.
+    const allIds = [...lay.order, ...Object.keys(EXTRAS).map(id => `${MENU}${id}`)]
+    const allOpen = allIds.every(id => open.includes(id))
+    const toggleAll = () => update($, sections, l => (allOpen ? l.filter(x => !allIds.includes(x)) : [...new Set([...l, ...allIds])]))
     // The warning line takes the memory index's colour when that is what is over; else orange.
     const warnColor: BarColor = memColor === 'error' || memColor === 'warning' ? memColor : 'warning'
     const titleOf = (id: string) => SECTIONS.find(x => x.id === id)?.title ?? id
@@ -915,7 +927,7 @@ export const register: Register = on => {
         {chipItems.map((it, i) => (
           <Box key={it.id} flexDirection="row" gap={1}>
             <Button key={`chip-${it.id}`} plain onPress={keep('chip-' + it.id, () => setLayout({ toggle: it.id }))}>
-              <Text dimColor={!it.isShown}>{`${it.isShown ? '☑' : '☐'} ${it.title}`}</Text>
+              <Text dimColor={!it.isShown}>{`${it.isShown ? '[x]' : '[ ]'} ${it.title}`}</Text>
             </Button>
             {i > 0 && (
               <Button key={`up-${it.id}`} plain onPress={keep('up-' + it.id, () => setLayout({ move: { id: it.id, to: i - 1 } }))}>
@@ -963,9 +975,9 @@ export const register: Register = on => {
     )
     // One group of the settings: a label and a one-line note that wrap, then its controls. Below 60 columns in the
     // terminal each group takes the full row; wider (and on surfaces that wrap by their own width) they share rows.
-    const isStacked = !flows && inner < 60
+    const isStacked = inner < 56
     const group = (key: string, label: string, note: string, body: unknown) => (
-      <Box key={key} flexDirection="column" gap={1} width={isStacked ? '100%' : undefined} flexGrow={1} flexShrink={1} minWidth={Math.min(24, inner)}>
+      <Box key={key} flexDirection="column" gap={1} width={isStacked ? '100%' : '48%'} flexGrow={0} flexShrink={0}>
         <Box key="h" flexDirection="column">
           <Text bold dimColor wrap="wrap">{label}</Text>
           <Text size="footnote" dimColor wrap="wrap">{note}</Text>
@@ -984,10 +996,13 @@ export const register: Register = on => {
             ...(v.mode ? [{ text: ` · ${v.mode}`, dim: true }] : []),
           ], () => void flip(VITALS_FOLDED))}
           </Box>
-          <Text dimColor tabular>
-            {v.isRunning ? 'working' : 'idle'}
-            {mainEx.ttft ? ` · first token ${v.ttftMs !== null ? dur(v.ttftMs) : '—'}` : ''}
-          </Text>
+          <Box key="status" flexDirection="row" gap={1} alignItems="center">
+            <Text dimColor tabular>
+              {v.isRunning ? 'working' : 'idle'}
+              {mainEx.ttft ? ` · first token ${v.ttftMs !== null ? dur(v.ttftMs) : '—'}` : ''}
+            </Text>
+            <Box key="cog" flexShrink={0}>{cog('settings', settingsOpen, () => void flip(SETTINGS_OPEN))}</Box>
+          </Box>
         </Box>
         <Box key="ctx" flexDirection="column">
           <Box key="h" flexDirection="row" justifyContent="space-between">
@@ -1020,31 +1035,28 @@ export const register: Register = on => {
             ),
           )}
         </Box>
-        <Box key="foot" flexDirection="row" gap={1} alignItems="flex-end" justifyContent="flex-end">
-          {cacheWarning !== null && (
+        {cacheWarning !== null && (
+          <Box key="foot" flexDirection="row" gap={1}>
             <Box flexGrow={1} flexShrink={1} minWidth={0}>
               <Text key="cache-warn" color={warnColor} size="footnote" wrap="wrap">
                 <Text size="body">⚠</Text>
                 {` Cache: ${cacheWarning}. See Cache.`}
               </Text>
             </Box>
-          )}
-          {/* Title size on the surface's own Button; under a theme its one-line surface draws one size, so bold there. Never dim: full ink, accent while open. */}
-          <Box key="cog" flexShrink={0}>
-            {cog('settings', settingsOpen, () => void flip(SETTINGS_OPEN))}
           </Box>
-        </Box>
+        )}
         {settingsOpen && (
-          <Box key="settings-body" flexDirection="column" gap={1}>
-            {rule('sep')}
-            {/* Labelled groups that wrap as whole columns: side by side when they fit, stacked when narrow.
-                Each takes an equal share of a row and never less than its minimum, so no row overflows. */}
-            <Box key="cols" flexDirection="row" flexWrap="wrap" columnGap={4} rowGap={1}>
+          menu('settings-body', [
+            <Box key="all" flexDirection="row">
+              <Button key="toggle-all" label={allOpen ? 'Collapse all' : 'Open all'} onPress={keep('toggle-all', () => void toggleAll())} />
+            </Box>,
+            // Labelled groups, each a fixed share of the row: two side by side when wide, stacked when narrow.
+            <Box key="cols" flexDirection="row" flexWrap="wrap" columnGap={2} rowGap={1}>
               {group('cards', 'CARDS', 'Tick to show, drag to move. Each card has its own ⚙ for its extras.', chips)}
               {group('main-extras', 'MAIN CARD', 'Extras shown in this card.', extraTicks('vitals'))}
               {group('sample', 'SAMPLE DATA', 'Fill empty cards with labelled sample values.', (
                 <Box key="sample-list" flexDirection="column" paddingLeft={1}>
-                  {pressable('sample-data', [{ text: isSample ? '☑' : '☐', color: isSample ? 'claude' : undefined, dim: !isSample, w: 3 }, { text: '  Sample data', dim: !isSample }], () => setLayout({ sample: true }))}
+                  {pressable('sample-data', [{ text: isSample ? '[x]' : '[ ]', color: isSample ? 'claude' : undefined, dim: !isSample, w: 3 }, { text: '  Sample data', dim: !isSample }], () => setLayout({ sample: true }))}
                 </Box>
               ))}
               {group('themes', 'THEME', 'Colours for the whole pane.', Client ? (
@@ -1053,12 +1065,12 @@ export const register: Register = on => {
                 <Box key="theme-list" flexDirection="column" paddingLeft={1}>
                   {themeChoices.map(o => {
                     const isOn = (lay.theme ?? 'app') === o.id
-                    return pressable(`theme-${o.id}`, [{ text: isOn ? '☑' : '☐', dim: !isOn, w: 3 }, { text: ` ${o.name}`, bold: isOn, dim: !isOn }], () => setLayout({ theme: o.id === 'app' ? null : o.id }))
+                    return pressable(`theme-${o.id}`, [{ text: isOn ? '[x]' : '[ ]', dim: !isOn, w: 3 }, { text: ` ${o.name}`, bold: isOn, dim: !isOn }], () => setLayout({ theme: o.id === 'app' ? null : o.id }))
                   })}
                 </Box>
               ))}
-            </Box>
-          </Box>
+            </Box>,
+          ])
         )}
       </Box>
     )
@@ -1369,21 +1381,22 @@ export const register: Register = on => {
 
     // ---- permissions
     const gt = BUCKETS.reduce((a, b) => ({ allowed: a.allowed + g.totals[b].allowed, asked: a.asked + g.totals[b].asked, denied: a.denied + g.totals[b].denied }), { allowed: 0, asked: 0, denied: 0 })
+    // Fixed columns, so they line up at every pane width.
+    const GATE_K = 9
+    const GATE_N = 10
     const gateBody = () => [
-      <Box key="head" flexDirection="row" gap={1}>
-        <Box flexGrow={1} flexShrink={1} minWidth={0}>{heading('k', 'KIND')}</Box>
-        {cell('a', 8, heading('a', 'ALLOWED'))}
-        {cell('q', 6, heading('q', 'ASKED'))}
-        {cell('d', 7, heading('d', 'DENIED'))}
+      <Box key="head" flexDirection="row">
+        {cell('k', GATE_K, heading('k', 'KIND'), false)}
+        {cell('a', GATE_N, heading('a', 'ALLOWED'))}
+        {cell('q', GATE_N, heading('q', 'ASKED'))}
+        {cell('d', GATE_N, heading('d', 'DENIED'))}
       </Box>,
       ...BUCKETS.filter(b => g.totals[b].allowed + g.totals[b].asked + g.totals[b].denied > 0).map(b => (
-        <Box key={b} flexDirection="row" gap={1}>
-          <Box flexGrow={1} flexShrink={1} minWidth={0}>
-            <Text>{b}</Text>
-          </Box>
-          {cell('a', 8, n(String(g.totals[b].allowed), { color: 'success' }))}
-          {cell('q', 6, n(String(g.totals[b].asked), { color: 'warning' }))}
-          {cell('d', 7, n(String(g.totals[b].denied), { color: g.totals[b].denied > 0 ? 'error' : undefined, dim: g.totals[b].denied === 0 }))}
+        <Box key={b} flexDirection="row">
+          {cell('k', GATE_K, <Text>{b}</Text>, false)}
+          {cell('a', GATE_N, n(String(g.totals[b].allowed), { color: 'success' }))}
+          {cell('q', GATE_N, n(String(g.totals[b].asked), { color: 'warning' }))}
+          {cell('d', GATE_N, n(String(g.totals[b].denied), { color: g.totals[b].denied > 0 ? 'error' : undefined, dim: g.totals[b].denied === 0 }))}
         </Box>
       )),
       gt.allowed + gt.asked + gt.denied > 0 &&

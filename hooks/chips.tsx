@@ -65,7 +65,7 @@ const Chips: ClientModule<Props, State> = (props, surface) => {
         return (
           <Box key={it.id} flexDirection="row" height={1}>
             <Text color={it.isShown ? (pal?.accent ?? 'claude') : pal?.muted} dimColor={!pal && !it.isShown}>
-              {it.isShown ? '☑' : '☐'}
+              {it.isShown ? '[x]' : '[ ]'}
             </Text>
             <Text color={pal?.muted} dimColor={!pal}>{props.isFixed ? '  ' : '  ⠿ '}</Text>
             <Text bold={isDragged} color={isDragged ? (pal?.accent ?? 'claude') : pal ? (it.isShown ? pal.fg : pal.muted) : undefined} dimColor={!pal && !it.isShown && !isDragged} wrap="truncate-end">

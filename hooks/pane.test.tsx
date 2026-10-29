@@ -310,9 +310,9 @@ test('desktop: a theme pick chooses a theme, and a Main extra flips', async ($, 
   await start($, on)
   const ui = await mount($, 'desktop')
   await ui.press({ key: 'settings' })
-  // No Client on desktop: each choice is a Button, ticked when its box reads ☑.
+  // No Client on desktop: each choice is a Button, ticked when its box reads [x].
   expect(await ui.findAll({ type: 'Client' })).toHaveLength(0)
-  const ticked = async (key: string) => JSON.stringify(await ui.find({ key })).includes('☑')
+  const ticked = async (key: string) => JSON.stringify(await ui.find({ key })).includes('[x]')
   expect(await ticked('theme-app')).toBe(true)
   expect(await ticked('theme-reader')).toBe(false)
   await ui.press({ key: 'theme-reader' })
@@ -592,7 +592,7 @@ test('desktop: plan-limit rows always show; the first-token tick toggles its val
 })
 
 // Desktop: every card's ⚙ opens at least one setting, with the separator under the options.
-test('desktop: every card with a settings icon shows a setting; the separator sits last', async ($, on) => {
+test('desktop: every card with a settings icon shows a setting; dividers sit above and below the items', async ($, on) => {
   mock.clock(on)
   mock.store(on)
   await start($, on)
@@ -603,7 +603,10 @@ test('desktop: every card with a settings icon shows a setting; the separator si
     const first = EXTRAS[id]?.[0]?.key
     if (first) expect(await ui.find({ key: `x-${id}-${first}` })).toBeDefined()
     const menu = JSON.stringify(await ui.find({ key: 'menu' }))
-    expect(menu.lastIndexOf('"sep"')).toBeGreaterThan(menu.lastIndexOf(`x-${id}-`))
+    expect(menu.indexOf('sep-top')).toBeGreaterThan(-1)
+    expect(menu.indexOf('sep-top')).toBeLessThan(menu.indexOf(`x-${id}-`))
+    expect(menu.indexOf('sep-bottom')).toBeGreaterThan(menu.lastIndexOf(`x-${id}-`))
+    await ui.press({ key: `cfg-${id}` })
   }
 })
 
@@ -618,7 +621,7 @@ test('desktop: Sample data tick fills empty cards and is saved', async ($, on) =
   await ui.press({ key: 'sample-data' })
   expect(await ui.find({ type: 'Text', text: /SAMPLE DATA is on/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^5-hour limit$/ })).toBeDefined()
-  expect(JSON.stringify(await ui.find({ key: 'sample-data' }))).toContain('☑')
+  expect(JSON.stringify(await ui.find({ key: 'sample-data' }))).toContain('[x]')
   expect(applyLayoutMessage(defaultLayout(), { sample: true }).sample).toBe(true)
   expect(cleanLayout({ sample: true }).sample).toBe(true)
   expect(cleanLayout({}).sample).toBeUndefined()
@@ -635,7 +638,61 @@ test('desktop: every card menu draws its tick Buttons without error', async ($, 
     expect(await ui.find({ type: 'Text', text: /could not draw/ })).toBeUndefined()
     for (const d of EXTRAS[id]!) {
       const tick = await ui.find({ key: `x-${id}-${d.key}` })
-      if (tick) expect(JSON.stringify(tick)).toMatch(/☑|☐/)
+      if (tick) expect(JSON.stringify(tick)).toMatch(/\[x\]|\[ \]/)
     }
   }
+})
+
+// Main card: the gear sits in the title row with the card's status; settings has a Open all / Collapse all Button.
+test('desktop: Main gear in its title row; Open all / Collapse all opens and closes every card and menu', async ($, on) => {
+  mock.clock(on)
+  mock.store(on)
+  await start($, on)
+  const ui = await mount($, 'desktop')
+  const title = JSON.stringify(await ui.find({ key: 'title' }))
+  expect(title).toContain('"settings"')
+  await ui.press({ key: 'settings' })
+  const settings = JSON.stringify(await ui.find({ key: 'settings-body' }))
+  expect(settings.indexOf('sep-top')).toBeGreaterThan(-1)
+  expect(settings.indexOf('sep-bottom')).toBeGreaterThan(settings.indexOf('theme-app'))
+  expect(settings).toContain('Open all')
+  await ui.press({ key: 'toggle-all' })
+  expect(JSON.stringify(await ui.find({ key: 'settings-body' }))).toContain('Collapse all')
+  for (const id of Object.keys(EXTRAS)) expect(await ui.find({ key: 'menu' })).toBeDefined()
+  expect(await ui.find({ key: 'cfg-turn' })).toBeDefined()
+  await ui.press({ key: 'toggle-all' })
+  expect(await ui.find({ key: 'menu' })).toBeUndefined()
+  expect(JSON.stringify(await ui.find({ key: 'settings-body' }))).toContain('Open all')
+})
+
+// Permissions: fixed column widths at narrow and wide panes.
+for (const cols of [30, 120])
+test(`desktop: Permissions columns are fixed width at ${cols} columns`, async ($, on) => {
+  mock.clock(on)
+  mock.store(on, { layout: { order: ['gate'], hidden: [], sample: true } })
+  await start($, on)
+  const ui = await $.ui.mount({ plugin: 'session-watcher', surface: 'desktop', component: 'Pane', requestId: 'session-watcher', props: { ...pane, bodyColumns: cols } })
+  await ui.press({ key: 'sec-gate' })
+  const head = JSON.stringify((await ui.findAll({ key: 'head' })).find(h => JSON.stringify(h).includes('ALLOWED')))
+  for (const w of ['"width":9', '"width":10']) expect(head).toContain(w)
+  expect(head.match(/"width":10/g)).toHaveLength(3)
+  expect(await ui.find({ type: 'Text', text: /could not draw/ })).toBeUndefined()
+})
+
+// Tick boxes: plain ASCII of one length in both states, in every theme.
+for (const theme of [undefined, 'frostwerk', 'reader'])
+test(`desktop: tick labels are the same length checked or not, theme ${theme ?? 'original'}`, async ($, on) => {
+  mock.clock(on)
+  mock.store(on, { layout: { order: ['session'], hidden: [], ...(theme ? { theme } : {}) } })
+  await start($, on)
+  const ui = await mount($, 'desktop')
+  await ui.press({ key: 'settings' })
+  const box = (s: string) => /\[[x ]\]/.exec(s)?.[0]
+  const a = JSON.stringify(await ui.find({ key: 'x-vitals-active' }))
+  await ui.press({ key: 'x-vitals-active' })
+  const b = JSON.stringify(await ui.find({ key: 'x-vitals-active' }))
+  expect(box(a)).toBe('[ ]')
+  expect(box(b)).toBe('[x]')
+  expect(box(a)!.length).toBe(box(b)!.length)
+  expect(a).not.toMatch(/[☑☐]/)
 })
