@@ -52,7 +52,7 @@ button.btn:hover, button.p:hover { color: var(--claude); }
 .sw8 { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
 .cell { flex: 0 0 auto; display: flex; min-width: 0; }
 .r { justify-content: flex-end; text-align: right; }
-.gridrow { display: flex; gap: 2ch; }
+.gridrow { display: flex; gap: 1ch; }
 .gridrow > div { flex: 1 1 0; min-width: 0; }
 .ind { padding-left: 1ch; }
 .warn { font-size: 11px; }
@@ -98,7 +98,7 @@ const T = (text, cls = '', color) => h('span', { class: cls, style: color ? `col
 const heading = text => h('div', { class: 'h' }, text)
 const n = (v, o = {}) => T(v, `num foot ${o.bold ? 'b' : ''} ${o.dim ? 'dim' : ''}`, o.color)
 const cellW = (w, node, right = true) => h('div', { class: `cell ${right ? 'r' : ''}`, style: `width:${w}ch` }, node)
-const NUM_W = 8, STAT_MIN = 16, GROUP_MIN = 24, COL_GAP = 2, KIND_W = 11
+const NUM_W = 8, STAT_MIN = 12, GROUP_MIN = 24, COL_GAP = 1, KIND_W = 11
 
 let inner = 60
 // DESIGN 9: label/value row.
@@ -280,8 +280,8 @@ function draw() {
   const sessEx = extrasOf('session')
   const sessionBody = () => [
     labelValue(`Total at ${hhmm(sc.at)}`, '', { text: usd(snapCost), color: 'claude' }),
-    hasScan && stats([stat('Main thread', usd(mainCost), { sub: `${perReq(mainCost, mainU.calls)} / request` }), stat('Sub-Agents', usd(agentCost), { sub: `${perReq(agentCost, agentU.calls)} / request` })], 3),
-    sessEx.tokens && stats([stat('Fresh', k(fresh(total)), { sub: 'input + write + output' }), stat('Cache read', k(total.cacheRead)), stat('Weighted', k(weighted(total)), { sub: 'tokens by price' })], 3),
+    (hasScan || sessEx.tokens) && stats([hasScan && stat('Main thread', usd(mainCost), { sub: `${perReq(mainCost, mainU.calls)} / request` }), hasScan && stat('Sub-Agents', usd(agentCost), { sub: `${perReq(agentCost, agentU.calls)} / request` }),
+      sessEx.tokens && stat('Fresh', k(fresh(total)), { sub: 'input + write + output' }), sessEx.tokens && stat('Cache read', k(total.cacheRead)), sessEx.tokens && stat('Weighted', k(weighted(total)), { sub: 'tokens by price' })]),
     kinds(total, inner, sessEx.tokens, hasScan ? snapCost : undefined),
     byModel.length > 0 && table([
       { id: 'sw', label: '', kind: 'mark', w: 1 }, { id: 'w', label: 'Who · model', kind: 'free' }, isWide && { id: 'c', label: 'Calls', kind: 'num' },

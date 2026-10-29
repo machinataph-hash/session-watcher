@@ -111,11 +111,11 @@ const buttonActions = new Map<string, (p: never) => void>()
 // The grid (docs/DESIGN.md): one inset for all card content, one indent step for nested rows, one gap between columns.
 const INSET = 1
 const INDENT = 1
-const COL_GAP = 2
+const COL_GAP = 1
 // Fixed widths: the arrow column of list rows, a stat column, a settings group, and the table's numeric columns.
 const ARROW_W = 3
 // The narrowest a stat column or settings group may be before the grid drops to fewer columns.
-const STAT_MIN = 16
+const STAT_MIN = 12
 const GROUP_MIN = 24
 // Every numeric table column: one width, right-aligned; the free-text column takes the rest.
 const NUM_W = 8
@@ -1332,15 +1332,14 @@ export const register: Register = on => {
     const sessionBody = () => [
       // The total every row below adds up to: the snapshot's cost, marked while the live cost has moved past it.
       labelValue('tot', `TOTAL AT ${hasScan ? hhmm(sc.at) : '—'}${isUpdating ? ' · UPDATING' : ''}`, isLagging && hasScan ? `as of ${hhmm(sc.at)}` : '', { text: usd(snapCost), color: 'claude' }),
-      hasScan && stats('s', [
-        stat('m', 'MAIN THREAD', usd(mainCost), { sub: `${perReq(mainCost, mainU.calls)} / request` }),
-        stat('a', 'SUB-AGENTS', usd(agentCost), { sub: `${perReq(agentCost, agentU.calls)} / request` }),
-      ], 3),
-      sessEx.tokens && stats('tk', [
-        stat('f', 'FRESH', k(fresh(total)), { sub: 'input + write + output' }),
-        stat('r', 'CACHE READ', k(total.cacheRead)),
-        stat('w', 'WEIGHTED', k(weighted(total)), { sub: 'tokens by price' }),
-      ], 3),
+      // One row: the cost split, then the token counts, side by side until the card is too narrow for them.
+      (hasScan || sessEx.tokens) && stats('s', [
+        hasScan && stat('m', 'MAIN THREAD', usd(mainCost), { sub: `${perReq(mainCost, mainU.calls)} / request` }),
+        hasScan && stat('a', 'SUB-AGENTS', usd(agentCost), { sub: `${perReq(agentCost, agentU.calls)} / request` }),
+        sessEx.tokens && stat('f', 'FRESH', k(fresh(total)), { sub: 'input + write + output' }),
+        sessEx.tokens && stat('r', 'CACHE READ', k(total.cacheRead)),
+        sessEx.tokens && stat('w', 'WEIGHTED', k(weighted(total)), { sub: 'tokens by price' }),
+      ]),
       kinds('kinds', total, inner, sessEx.tokens, hasScan ? snapCost : undefined),
       byModel.length > 0 && table('who', [
         { id: 'sw', label: '', kind: 'mark', w: 1 },

@@ -6,7 +6,7 @@ tree at desktop widths 30, 60, 120 and 200 and terminal widths 80 and 140, setti
 ## 1. Grid
 1.1 All card content sits one cell in from the card border (`INSET = 1`), on every card.
 1.2 Nested rows (tick lists, the Cards list) sit one indent step further in (`INDENT = 1`). No other indent exists.
-1.3 Table columns are separated by one cell; grid columns (stats, settings groups) by two (`COL_GAP = 2`), everywhere.
+1.3 Table columns are separated by one cell; grid columns (stats, settings groups) by one as well (`COL_GAP = 1`), everywhere.
 
 ## 2. Card template
 2.1 Title row: disclosure arrow and name on the left; dim summary, then the gear, on the right. The gear is one size on every card.
@@ -34,9 +34,10 @@ tree at desktop widths 30, 60, 120 and 200 and terminal widths 80 and 140, setti
 
 ## 6. Grids (stat rows and settings groups)
 6.1 Columns span the card wall to wall and are equal: every cell grows from zero (`flexGrow 1`, width 0, `minWidth 0`), so the first column starts on the left inset and the last ends on the right inset.
-6.2 Each stat column needs at least 16 cells, each settings group 24. A grid shows the most columns that fit at that minimum, stepping down one column at a time (6, 5, 4, 3, 2, 1).
+6.2 Each stat column needs at least 12 cells, each settings group 24. A grid shows the most columns that fit at that minimum, stepping down one column at a time (6, 5, 4, 3, 2, 1).
 6.3 Every row of a grid has the same column count and widths; a short last row is padded with empty cells, never stretched.
-6.4 All grids in one card share one column count (the card's widest row), so column edges line up from row to row; a shorter row is padded with empty cells.
+6.4 Stats that belong together sit in one grid, so they stay on one row as long as they fit; Session Totals shows its cost split and token counts as one row of five.
+6.5 All grids in one card share one column count (the card's widest row), so column edges line up from row to row; a shorter row is padded with empty cells.
 6.4 When the surface reports no width, the grid hands the reflow to the surface: cells wrap at their minimum width.
 
 ## 7. Tables
