@@ -26,6 +26,8 @@ test(`desktop + terminal, real state, theme ${theme ?? "original"}, ${cols} colu
   for (const surface of ['desktop', 'terminal'] as const) {
     const ui = await $.ui.mount({ plugin: 'session-watcher', surface, component: 'Pane', requestId: 'session-watcher', props: { ...pane, bodyColumns: cols } })
     expect(await ui.find({ type: 'Text', text: /could not draw/ })).toBeUndefined()
+    // A desktop Client that misses its 2000ms render answer tears the whole pane down, so desktop draws none.
+    if (surface === 'desktop') expect(await ui.findAll({ type: 'Client' })).toHaveLength(0)
     for (const k of ['settings', 'cfg-session', 'cfg-cache', 'cfg-agents', 'sec-agents', 'sec-cache', 'sec-turn', 'sec-requests', 'sec-gate', 'sec-log', 'cfg-turn']) {
       if (await ui.find({ key: k })) await ui.press({ key: k })
       expect(await ui.find({ type: 'Text', text: /could not draw/ })).toBeUndefined()

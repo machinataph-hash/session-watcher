@@ -254,7 +254,7 @@ test('a new window at 0% starts clean, a shift of milliseconds is the same windo
   expect(estimateLimit(m, one(0))).toBe(0.7)
 })
 
-// Settings under Vitals: the cog opens the section chips; a tick hides a section, a drag moves it, and both are kept.
+// Settings under Vitals: the cog opens the section chips; a tick hides a section, a move changes the order, and both are kept.
 for (const surface of ['terminal', 'desktop'] as const)
   test(`${surface}: the section chips hide and move sections, and the layout is saved`, async ($, on) => {
     mock.clock(on)
@@ -266,21 +266,35 @@ for (const surface of ['terminal', 'desktop'] as const)
     expect(await ui.find({ type: 'Text', text: /^CARDS$/ })).toBeDefined()
     // Untick Tasks (row 1): its section goes, its chip stays.
     expect(await ui.find({ type: 'Text', text: /^Tasks$/ })).toBeDefined()
-    await ui.pointer({ type: 'down', x: 0, y: 1, button: 'left', in: 'section-chips' })
-    await ui.pointer({ type: 'up', x: 0, y: 1, button: 'left', in: 'section-chips' })
-    expect(await ui.find({ key: 'sec-tasks' })).toBeUndefined()
-    // A click on the title, not the box, ticks it too: it comes back, then goes again.
-    await ui.pointer({ type: 'down', x: 12, y: 1, button: 'left', in: 'section-chips' })
-    await ui.pointer({ type: 'up', x: 12, y: 1, button: 'left', in: 'section-chips' })
-    expect(await ui.find({ key: 'sec-tasks' })).toBeDefined()
-    await ui.pointer({ type: 'down', x: 12, y: 1, button: 'left', in: 'section-chips' })
-    await ui.pointer({ type: 'up', x: 12, y: 1, button: 'left', in: 'section-chips' })
-    expect(await ui.find({ key: 'sec-tasks' })).toBeUndefined()
-    // Drag Activity (row 7) to the top.
-    await ui.pointer({ type: 'down', x: 6, y: 7, button: 'left', in: 'section-chips' })
-    await ui.pointer({ type: 'move', x: 6, y: 0, button: 'left', in: 'section-chips' })
-    await ui.pointer({ type: 'up', x: 6, y: 0, button: 'left', in: 'section-chips' })
-    const keys = (await ui.findAll({ type: 'Button' })).map(b => (b as { key?: string }).key).filter(x => x?.startsWith('sec-') && x !== 'sec-vitals')
+    const sections = async () => (await ui.findAll({ type: 'Button' })).map(b => (b as { key?: string }).key).filter(x => x?.startsWith('sec-') && x !== 'sec-vitals')
+    if (surface === 'terminal') {
+      await ui.pointer({ type: 'down', x: 0, y: 1, button: 'left', in: 'section-chips' })
+      await ui.pointer({ type: 'up', x: 0, y: 1, button: 'left', in: 'section-chips' })
+      expect(await ui.find({ key: 'sec-tasks' })).toBeUndefined()
+      // A click on the title, not the box, ticks it too: it comes back, then goes again.
+      await ui.pointer({ type: 'down', x: 12, y: 1, button: 'left', in: 'section-chips' })
+      await ui.pointer({ type: 'up', x: 12, y: 1, button: 'left', in: 'section-chips' })
+      expect(await ui.find({ key: 'sec-tasks' })).toBeDefined()
+      await ui.pointer({ type: 'down', x: 12, y: 1, button: 'left', in: 'section-chips' })
+      await ui.pointer({ type: 'up', x: 12, y: 1, button: 'left', in: 'section-chips' })
+      // Drag Activity (row 7) to the top.
+      await ui.pointer({ type: 'down', x: 6, y: 7, button: 'left', in: 'section-chips' })
+      await ui.pointer({ type: 'move', x: 6, y: 0, button: 'left', in: 'section-chips' })
+      await ui.pointer({ type: 'up', x: 6, y: 0, button: 'left', in: 'section-chips' })
+    } else {
+      // The desktop draws no Client (one that misses its render answer tears the pane down): a Button per chip, an arrow per move.
+      expect(await ui.findAll({ type: 'Client' })).toHaveLength(0)
+      expect(await ui.find({ key: 'section-chips' })).toBeUndefined()
+      await ui.press({ key: 'chip-tasks' })
+      expect(await ui.find({ key: 'sec-tasks' })).toBeUndefined()
+      expect(await ui.find({ key: 'chip-tasks' })).toBeDefined()
+      await ui.press({ key: 'chip-tasks' })
+      expect(await ui.find({ key: 'sec-tasks' })).toBeDefined()
+      await ui.press({ key: 'chip-tasks' })
+      // Move Activity up until it is first.
+      for (let i = 0; i < 12 && (await sections())[0] !== 'sec-log'; i++) await ui.press({ key: 'up-log' })
+    }
+    const keys = await sections()
     expect(keys[0]).toBe('sec-log')
     expect(keys).not.toContain('sec-tasks')
     // The sections themselves still open and close.
@@ -290,28 +304,27 @@ for (const surface of ['terminal', 'desktop'] as const)
   })
 
 // The theme and the Main card's extras are tick lists; both picks are saved.
-test('desktop: a theme tick picks a theme, and a Main extra flips', async ($, on) => {
+test('desktop: a theme pick chooses a theme, and a Main extra flips', async ($, on) => {
   mock.clock(on)
   mock.store(on)
   await start($, on)
   const ui = await mount($, 'desktop')
   await ui.press({ key: 'settings' })
-  const items = async (key: string) => (((await ui.find({ key })) as any)?.props?.props?.items ?? []) as { id: string; isShown: boolean }[]
-  const on1 = async (key: string) => (await items(key)).filter(i => i.isShown).map(i => i.id)
-  const click = async (key: string, y: number) => {
-    await ui.pointer({ type: 'down', x: 4, y, button: 'left', in: key })
-    await ui.pointer({ type: 'up', x: 4, y, button: 'left', in: key })
-  }
-  expect(await on1('setting-ticks-theme')).toEqual(['theme:app'])
-  await click('setting-ticks-theme', 2)
-  expect(await on1('setting-ticks-theme')).toEqual(['theme:reader'])
-  expect(await on1('setting-ticks-card:vitals')).toEqual([])
+  // No Client on desktop: each choice is a Button, ticked when its box reads ☑.
+  expect(await ui.findAll({ type: 'Client' })).toHaveLength(0)
+  const ticked = async (key: string) => JSON.stringify(await ui.find({ key })).includes('☑')
+  expect(await ticked('theme-app')).toBe(true)
+  expect(await ticked('theme-reader')).toBe(false)
+  await ui.press({ key: 'theme-reader' })
+  expect(await ticked('theme-reader')).toBe(true)
+  expect(await ticked('theme-app')).toBe(false)
+  expect(await ticked('x-vitals-active')).toBe(false)
   expect(await ui.find({ type: 'Text', text: /^ACTIVE$/ })).toBeUndefined()
-  await click('setting-ticks-card:vitals', 0)
-  expect(await on1('setting-ticks-card:vitals')).toEqual(['active'])
+  await ui.press({ key: 'x-vitals-active' })
+  expect(await ticked('x-vitals-active')).toBe(true)
   expect(await ui.find({ type: 'Text', text: /^ACTIVE$/ })).toBeDefined()
-  await click('setting-ticks-theme', 0)
-  expect(await on1('setting-ticks-theme')).toEqual(['theme:app'])
+  await ui.press({ key: 'theme-app' })
+  expect(await ticked('theme-app')).toBe(true)
 })
 
 test('a stored layout is cleaned: unknown ids dropped, new sections added last', () => {
@@ -399,26 +412,26 @@ for (const id of Object.keys(THEMES))
     mock.store(on, { layout: { theme: id } })
     await start($, on)
     const ui = await mount($, 'desktop')
-    await ui.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: 'press:settings' })
-    expect(await ui.find({ key: 'setting-ticks-theme' })).toBeDefined()
+    await ui.press({ key: 'settings' })
+    expect(await ui.find({ key: 'theme-app' })).toBeDefined()
+    // The desktop draws no Client at all: a Client that misses its 2000ms render answer tears the whole pane down.
+    expect(await ui.findAll({ type: 'Client' })).toHaveLength(0)
     for (const x of await ui.findAll({ type: 'Text' })) {
       const c = (x as any).props?.color
       expect(typeof c).toBe('string')
       expect([t.bg, t.card]).not.toContain(c)
     }
-    // Every clickable title is its own one-line surface in theme colours; no Button holds text.
-    const holding = (await ui.findAll({ type: 'Button' })).filter(b => ((b as any).children ?? []).length > 0)
-    expect(holding).toHaveLength(0)
-    const titles = (await ui.findAll({ type: 'Client' })).filter(c => String((c as any).key).startsWith('press:'))
-    expect(titles.length).toBeGreaterThan(3)
-    for (const c of titles) for (const r of (c as any).props.props.runs) expect([t.bg, t.card]).not.toContain(r.color)
+    // Every clickable title is a Button holding the mod's own Text in a theme colour.
+    const buttons = await ui.findAll({ type: 'Button' })
+    expect(buttons.length).toBeGreaterThan(3)
+    for (const b of buttons) for (const c of JSON.stringify(b).matchAll(/"color":"([^"]+)"/g)) expect([t.bg, t.card]).not.toContain(c[1])
     expect((await ui.findAll({ type: 'Box' })).filter(b => (b as any).props?.backgroundColor !== undefined && (b as any).props?.backgroundColor !== t.card)).toHaveLength(0)
     // A task header still opens and closes the task, and a section title still folds its section.
-    const task = titles.map(c => String((c as any).key)).find(k => k.startsWith('press:open-'))
+    const task = buttons.map(b => String((b as any).key)).find(k => k.startsWith('open-'))
     expect(task).toBeDefined()
-    await ui.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: task! })
-    expect(await ui.find({ key: 'press:sec-tasks' })).toBeDefined()
-    await ui.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'press:sec-tasks' })
+    await ui.press({ key: task! })
+    expect(await ui.find({ key: 'sec-tasks' })).toBeDefined()
+    await ui.press({ key: 'sec-tasks' })
     expect(await ui.find({ key: task! })).toBeUndefined()
   })
 
