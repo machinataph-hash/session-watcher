@@ -1,7 +1,7 @@
 // Pure helpers: numbers, prices, formatting. No engine calls here.
 import type { ModelUsage, SessionContextBreakdown } from 'claude-code'
 
-import type { Bucket, Gate, Layout, Row, Scan, Task, Usage } from '../types'
+import type { Bucket, Gate, Layout, Row, Scan, Targets, Task, Usage } from '../types'
 
 export const empty = (): Usage => ({ input: 0, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0, output: 0, calls: 0, usd: 0 })
 export const newTask = (label: string, now: number): Task => ({
@@ -275,9 +275,44 @@ export const SECTIONS: { id: string; title: string }[] = [
 const SECTION_IDS = SECTIONS.map(s => s.id)
 export const defaultLayout = (): Layout => ({ order: [...SECTION_IDS], hidden: [] })
 
+// The limits set in settings: each moves by its step between min and max. Memory is chars of the
+// memory index (green to Good, orange to Fine, red past it, the bar Bar wide); context and plan limits
+// are percents (orange from Warn, red from Bad); requests per turn turn red past the limit.
+export const TARGETS: { id: keyof Targets; label: string; value: number; step: number; min: number; max: number }[] = [
+  { id: 'memGood', label: 'Memory index: good to', value: 4200, step: 200, min: 1000, max: 30000 },
+  { id: 'memFine', label: 'Memory index: fine to', value: 5800, step: 200, min: 1000, max: 30000 },
+  { id: 'memBar', label: 'Memory index: bar width', value: 10000, step: 1000, min: 2000, max: 40000 },
+  { id: 'ctxWarn', label: 'Context: orange from %', value: 65, step: 5, min: 10, max: 95 },
+  { id: 'ctxBad', label: 'Context: red from %', value: 85, step: 5, min: 15, max: 100 },
+  { id: 'limWarn', label: 'Plan limits: orange from %', value: 60, step: 5, min: 10, max: 95 },
+  { id: 'limBad', label: 'Plan limits: red from %', value: 85, step: 5, min: 15, max: 100 },
+  { id: 'turnMax', label: 'Requests per turn: limit', value: 15, step: 1, min: 1, max: 200 },
+]
+
+/** The limits in force: the saved ones over the defaults, then held in order (good < fine <= bar, warn < bad). */
+export const targetsOf = (l: Layout): Targets => {
+  const t = Object.fromEntries(TARGETS.map(d => [d.id, d.value])) as Targets
+  for (const d of TARGETS) {
+    const v = l.targets?.[d.id]
+    if (typeof v === 'number' && Number.isFinite(v)) t[d.id] = Math.max(d.min, Math.min(d.max, Math.round(v)))
+  }
+  t.memFine = Math.max(t.memFine, t.memGood + 200)
+  t.memBar = Math.max(t.memBar, t.memFine)
+  t.ctxBad = Math.max(t.ctxBad, t.ctxWarn + 5)
+  t.limBad = Math.max(t.limBad, t.limWarn + 5)
+  return t
+}
+
+// Only the limits that differ from the defaults are kept, so a later change of a default reaches everyone who left it.
+const changedTargets = (t: Targets) => {
+  const out: Partial<Targets> = {}
+  for (const d of TARGETS) if (t[d.id] !== d.value) out[d.id] = t[d.id]
+  return Object.keys(out).length > 0 ? { targets: out } : {}
+}
+
 /** Any stored value made a valid layout: known ids once each, in their saved order, new sections last. */
 export const cleanLayout = (raw: unknown): Layout => {
-  const r = (raw ?? {}) as { order?: unknown; hidden?: unknown; hideCacheBar?: unknown; theme?: unknown }
+  const r = (raw ?? {}) as { order?: unknown; hidden?: unknown; hideCacheBar?: unknown; theme?: unknown; targets?: unknown }
   const ids = (x: unknown) => (Array.isArray(x) ? x.filter((id): id is string => typeof id === 'string' && SECTION_IDS.includes(id)) : [])
   const order = [...new Set(ids(r.order))]
   return {
@@ -285,12 +320,26 @@ export const cleanLayout = (raw: unknown): Layout => {
     hidden: [...new Set(ids(r.hidden))],
     ...(r.hideCacheBar === true ? { hideCacheBar: true } : {}),
     ...(typeof r.theme === 'string' && r.theme in THEMES ? { theme: r.theme } : {}),
+    ...changedTargets(targetsOf({ order: [], hidden: [], targets: typeof r.targets === 'object' && r.targets !== null ? (r.targets as Partial<Targets>) : undefined })),
   }
 }
 
 /** A message from the section chips: tick one, or move one to a new place. Anything else leaves it as it was. */
 export const applyLayoutMessage = (l: Layout, data: unknown): Layout => {
-  const d = (data ?? {}) as { toggle?: unknown; move?: { id?: unknown; to?: unknown }; flag?: unknown; theme?: unknown }
+  const d = (data ?? {}) as { toggle?: unknown; move?: { id?: unknown; to?: unknown }; flag?: unknown; theme?: unknown; target?: unknown }
+  // A limit one step up or down ({ target: { id, by: 1 | -1 } }), or all back to the defaults ({ target: 'reset' }).
+  if (d.target === 'reset') {
+    const { targets: _, ...rest } = l
+    return rest
+  }
+  const tg = d.target as { id?: unknown; by?: unknown } | undefined
+  const def = TARGETS.find(x => x.id === tg?.id)
+  if (def && (tg?.by === 1 || tg?.by === -1)) {
+    const { targets: _, ...rest } = l
+    const t = targetsOf(l)
+    t[def.id] = Math.max(def.min, Math.min(def.max, t[def.id] + tg.by * def.step))
+    return { ...rest, ...changedTargets(targetsOf({ ...rest, targets: t })) }
+  }
   if (d.flag === 'cacheBar') {
     const { hideCacheBar, ...rest } = l
     return hideCacheBar ? rest : { ...rest, hideCacheBar: true }

@@ -20,6 +20,8 @@ import {
   applyLayoutMessage,
   cleanLayout,
   defaultLayout,
+  TARGETS,
+  targetsOf,
   emptyLimitModel,
   estimateLimit,
   factorOf,
@@ -81,12 +83,6 @@ const log = atom({ plugin: 'session-watcher', key: 'log' } as const, [] as LogLi
 const DEFAULT_OPEN = ['session', 'tasks']
 // kept in the same list as the open sections: present means the Vitals stats row is folded away
 const VITALS_FOLDED = 'vitals-folded'
-// Cache health limits: past either, a line in the Vitals card says so.
-const MEMORY_MAX = 4200
-// The memory index bar: 10k wide, green to 4,200, orange to 5,800, red past it.
-const MEMORY_BAR = 10000
-const MEMORY_RED = 5800
-const TURN_MAX = 15
 const sections = atom({ plugin: 'session-watcher', key: 'sections' } as const, DEFAULT_OPEN)
 // present in the same list: the settings under Vitals are open
 const SETTINGS_OPEN = 'settings-open'
@@ -574,6 +570,8 @@ export const register: Register = on => {
       read($, layout),
     ])
     const lay = cleanLayout(lay0)
+    // The limits the bars are coloured by, as set in settings.
+    const tg = targetsOf(lay)
     const now = await $.clock.now()
     drawnAt = now
     // A session whose start was missed still has a current task to show.
@@ -686,6 +684,14 @@ export const register: Register = on => {
       ) : (
         <Text color={color}>■</Text>
       )
+    // A full-width bar in a row one line tall with the bar centered, so it has the same room above and below as a meter row.
+    const barRow = (key: string, parts: { value: number; color: BarColor }[], cells: number) => (
+      <Box key={key} flexDirection="row" height={1} alignItems="center">
+        <Box flexGrow={1} flexShrink={1} minWidth={0}>
+          {strip('b', parts, { track: true, cells })}
+        </Box>
+      </Box>
+    )
     // The split bar in a row one line tall with the bar centered, as each KIND row draws its bar.
     const splitRow = (parts: { value: number; color: BarColor }[], cells: number) => (
       <Box key="split" flexDirection="row" alignItems="center">
@@ -773,15 +779,15 @@ export const register: Register = on => {
     // Measured against the limit the session actually compacts at; the engine's own percent is against the model's window.
     const ctxMax = v.ctxLimit > 0 ? v.ctxLimit : v.ctxWindow
     const ctxPct = v.ctxTokens !== null && ctxMax > 0 ? Math.round((100 * v.ctxTokens) / ctxMax) : v.ctxLimit > 0 ? null : v.ctxPct
-    const ctxColor: BarColor = ctxPct === null ? 'inactive' : ctxPct >= 85 ? 'error' : ctxPct >= 65 ? 'warning' : 'success'
+    const ctxColor: BarColor = ctxPct === null ? 'inactive' : ctxPct >= tg.ctxBad ? 'error' : ctxPct >= tg.ctxWarn ? 'warning' : 'success'
     const runFor = now - startedAt
     const actMs = activeMs(act, now)
     // ---- cache health: read from the transcripts; requests this turn from the live log
     const ch = sc.cache
     const turnReqs = tn && tn.startedAt > 0 ? callList.filter(c => c.who === 'main thread' && c.at >= tn.startedAt).length : 0
-    const memColor: BarColor = !ch || ch.memoryChars === null ? 'inactive' : ch.memoryChars > MEMORY_RED ? 'error' : ch.memoryChars > MEMORY_MAX ? 'warning' : 'success'
+    const memColor: BarColor = !ch || ch.memoryChars === null ? 'inactive' : ch.memoryChars > tg.memFine ? 'error' : ch.memoryChars > tg.memGood ? 'warning' : 'success'
     const memWord = memColor === 'error' ? 'Bad' : memColor === 'warning' ? 'Fine' : 'Good'
-    const cacheWarning = ch && ch.memoryChars !== null && ch.memoryChars > MEMORY_MAX ? `memory index ${k(ch.memoryChars)} chars (target ${MEMORY_MAX.toLocaleString('en-US')})` : null
+    const cacheWarning = ch && ch.memoryChars !== null && ch.memoryChars > tg.memGood ? `memory index ${k(ch.memoryChars)} chars (target ${tg.memGood.toLocaleString('en-US')})` : null
     // The title folds away the stats row (cost, running for, active, requests); Session totals keeps cost and requests.
     const vitalsOpen = !isOpen(VITALS_FOLDED)
     const settingsOpen = isOpen(SETTINGS_OPEN)
@@ -849,7 +855,7 @@ export const register: Register = on => {
               {ctxPct !== null ? <Text color={ctxColor} bold>{`  ${ctxPct}%`}</Text> : ''}
             </Text>
           </Box>
-          {strip('bar', [{ value: (ctxPct ?? 0) / 100, color: ctxColor }], { track: true, cells: inner })}
+          {barRow('bar', [{ value: (ctxPct ?? 0) / 100, color: ctxColor }], inner)}
         </Box>
         {vitalsOpen && stats('s1', [
           stat('cost', v.costUsd !== null ? 'COST' : 'COST (EST.)', usd(v.costUsd ?? total.usd), { color: 'claude' }),
@@ -864,7 +870,7 @@ export const register: Register = on => {
                 l.kind,
                 l.kind === 'five_hour' ? '5-hour limit' : l.kind === 'seven_day' ? '7-day limit' : l.kind.replace(/_/g, ' '),
                 (l.est ?? l.pct) / 100,
-                l.pct >= 85 ? 'error' : l.pct >= 60 ? 'warning' : 'suggestion',
+                l.pct >= tg.limBad ? 'error' : l.pct >= tg.limWarn ? 'warning' : 'suggestion',
                 n(l.est != null ? `${l.est.toFixed(2)}%` : `${Math.round(l.pct)}%`, { bold: true }),
                 l.resetsAt ? `↻ ${untilReset(Math.max(0, l.resetsAt - now))}` : '',
               ),
@@ -876,13 +882,13 @@ export const register: Register = on => {
             {meterRow(
               'row',
               'Cache health',
-              Math.min(1, ch.memoryChars / MEMORY_BAR),
+              Math.min(1, ch.memoryChars / tg.memBar),
               memColor,
               <Text tabular size="footnote" bold weight="semibold" color={memColor}>{memWord}</Text>,
               `${k(ch.memoryChars)} chars`,
             )}
             <Text key="why" size="footnote" dimColor wrap="wrap">
-              {`Memory index loaded into every request: ${ch.memoryChars.toLocaleString('en-US')} of ${MEMORY_BAR.toLocaleString('en-US')} chars. Good to ${MEMORY_MAX.toLocaleString('en-US')} (target), Fine to ${MEMORY_RED.toLocaleString('en-US')}, Bad past it. Start ${k(ch.first)} · ${ch.rebuildCount} rebuild${ch.rebuildCount === 1 ? '' : 's'}.`}
+              {`Memory index loaded into every request: ${ch.memoryChars.toLocaleString('en-US')} of ${tg.memBar.toLocaleString('en-US')} chars. Good to ${tg.memGood.toLocaleString('en-US')} (target), Fine to ${tg.memFine.toLocaleString('en-US')}, Bad past it. Start ${k(ch.first)} · ${ch.rebuildCount} rebuild${ch.rebuildCount === 1 ? '' : 's'}.`}
             </Text>
           </Box>
         )}
@@ -895,8 +901,9 @@ export const register: Register = on => {
               </Text>
             </Box>
           )}
+          {/* Title size on the surface's own Button; under a theme its one-line surface draws one size, so bold there. */}
           <Box key="cog" width={2} flexShrink={0}>
-            {pressable('settings', [{ text: '⚙', color: settingsOpen ? 'claude' : undefined, dim: !settingsOpen, size: 'title' }], () => void flip(SETTINGS_OPEN))}
+            {pressable('settings', [{ text: '⚙', color: settingsOpen ? 'claude' : undefined, dim: !settingsOpen && !theme, bold: true, size: 'title' }], () => void flip(SETTINGS_OPEN))}
           </Box>
         </Box>
         {settingsOpen && (
@@ -930,6 +937,24 @@ export const register: Register = on => {
                     })}
                   </Box>
                 )}
+              </Box>
+              <Box key="targets" flexDirection="column" flexShrink={0} gap={1}>
+                {heading('tg', 'TARGETS')}
+                <Box key="rows" flexDirection="column">
+                  {TARGETS.map(d => (
+                    <Box key={d.id} flexDirection="row" gap={1} alignItems="center">
+                      <Box width={27} flexShrink={0}>
+                        <Text dimColor wrap="truncate-end">{d.label}</Text>
+                      </Box>
+                      <Box width={2} flexShrink={0}>{pressable(`tg-${d.id}-dn`, [{ text: '−', bold: true }], () => setLayout({ target: { id: d.id, by: -1 } }))}</Box>
+                      <Box width={7} flexShrink={0} justifyContent="flex-end">
+                        <Text tabular bold={tg[d.id] !== d.value} color={tg[d.id] !== d.value ? 'claude' : undefined}>{tg[d.id].toLocaleString('en-US')}</Text>
+                      </Box>
+                      <Box width={2} flexShrink={0}>{pressable(`tg-${d.id}-up`, [{ text: '+', bold: true }], () => setLayout({ target: { id: d.id, by: 1 } }))}</Box>
+                    </Box>
+                  ))}
+                </Box>
+                {lay.targets && pressable('tg-reset', [{ text: '↺ Back to the defaults', dim: true }], () => setLayout({ target: 'reset' }))}
               </Box>
             </Box>
           </Box>
@@ -1242,7 +1267,7 @@ export const register: Register = on => {
         : [
             stats('c', [
               stat('f', 'STARTING LOAD', k(ch.first), { sub: 'first request', w: stat3 }),
-              stat('t', 'REQUESTS THIS TURN', String(turnReqs), { color: turnReqs > TURN_MAX ? 'error' : undefined, sub: `limit ${TURN_MAX}`, w: stat3 }),
+              stat('t', 'REQUESTS THIS TURN', String(turnReqs), { color: turnReqs > tg.turnMax ? 'error' : undefined, sub: `limit ${tg.turnMax}`, w: stat3 }),
               stat('r', 'REBUILDS', String(ch.rebuildCount), { sub: `${k(ch.rebuildTokens)} written`, w: stat3 }),
             ]),
             ch.memoryChars !== null && (
@@ -1250,13 +1275,13 @@ export const register: Register = on => {
                 <Box key="h" flexDirection="row" justifyContent="space-between">
                   {heading('l', 'MEMORY INDEX')}
                   <Text tabular dimColor>
-                    {`${ch.memoryChars.toLocaleString('en-US')} / ${MEMORY_BAR.toLocaleString('en-US')} chars`}
+                    {`${ch.memoryChars.toLocaleString('en-US')} / ${tg.memBar.toLocaleString('en-US')} chars`}
                     <Text color={memColor} bold>{`  ${memWord}`}</Text>
                   </Text>
                 </Box>
-                {strip('bar', [{ value: Math.min(1, ch.memoryChars / MEMORY_BAR), color: memColor }], { track: true, cells: inner })}
+                {barRow('bar', [{ value: Math.min(1, ch.memoryChars / tg.memBar), color: memColor }], inner)}
                 <Text size="footnote" dimColor tabular wrap="truncate-end">
-                  {`Good to ${MEMORY_MAX.toLocaleString('en-US')} (target) · Fine to ${MEMORY_RED.toLocaleString('en-US')} · Bad past it`}
+                  {`Good to ${tg.memGood.toLocaleString('en-US')} (target) · Fine to ${tg.memFine.toLocaleString('en-US')} · Bad past it`}
                 </Text>
               </Box>
             ),

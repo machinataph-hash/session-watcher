@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 import Chips from './chips'
-import { applyLayoutMessage, breakdownText, cleanLayout, defaultLayout, emptyLimitModel, estimateLimit, fromModel, paint, THEMES, stepLimitModel, usdOf, weighted } from './core'
+import { applyLayoutMessage, breakdownText, cleanLayout, defaultLayout, targetsOf, emptyLimitModel, estimateLimit, fromModel, paint, THEMES, stepLimitModel, usdOf, weighted } from './core'
 
 const pane = { title: '', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} } as const
 const usage = { model: 'claude-opus-5-5', input_tokens: 1000, output_tokens: 2000, cache_read_input_tokens: 100000, cache_creation_input_tokens: 4000 }
@@ -425,3 +425,44 @@ for (const surface of ['terminal', 'desktop'] as const)
       const look = (b: any) => JSON.stringify([b.props.borderStyle, b.props.borderColor ?? null, b.props.borderDimColor ?? null, b.props.backgroundColor ?? null, b.props.hover ?? null])
       expect(new Set(cards.map(look)).size).toBe(1)
     })
+
+test('targets: steps move within range, order holds, defaults are not stored, reset clears', () => {
+  const base = cleanLayout(undefined)
+  expect(targetsOf(base).memGood).toBe(4200)
+  let l = applyLayoutMessage(base, { target: { id: 'memGood', by: 1 } })
+  expect(l.targets).toEqual({ memGood: 4400 })
+  l = applyLayoutMessage(l, { target: { id: 'memGood', by: -1 } })
+  expect(l.targets).toBeUndefined()
+  // Good may not pass Fine: raising Good past it carries Fine up with it.
+  for (let i = 0; i < 10; i++) l = applyLayoutMessage(l, { target: { id: 'memGood', by: 1 } })
+  const t = targetsOf(l)
+  expect(t.memGood).toBe(6200)
+  expect(t.memFine).toBeGreaterThan(t.memGood)
+  expect(t.memBar).toBeGreaterThanOrEqual(t.memFine)
+  // A limit never leaves its range, and an unknown id or step changes nothing.
+  let c = base
+  for (let i = 0; i < 30; i++) c = applyLayoutMessage(c, { target: { id: 'ctxBad', by: 1 } })
+  expect(targetsOf(c).ctxBad).toBe(100)
+  expect(applyLayoutMessage(base, { target: { id: 'nope', by: 1 } })).toEqual(base)
+  expect(applyLayoutMessage(base, { target: { id: 'turnMax', by: 5 } })).toEqual(base)
+  expect(applyLayoutMessage(l, { target: 'reset' }).targets).toBeUndefined()
+  // A stored value is kept when valid, clamped when out of range, dropped when not a number.
+  expect(cleanLayout({ targets: { turnMax: 30 } }).targets).toEqual({ turnMax: 30 })
+  expect(cleanLayout({ targets: { turnMax: 9999 } }).targets).toEqual({ turnMax: 200 })
+  expect(cleanLayout({ targets: { turnMax: 'x', nope: 3 } }).targets).toBeUndefined()
+})
+
+test('targets: the settings column steps a limit and the bars use it', async ($, on) => {
+  mock.clock(on)
+  await start($, on)
+  const ui = await mount($, 'desktop')
+  const shown = async () => (await ui.findAll({ type: 'Text' })).some(x => (x as any).props?.children === '16' || (x as any).children?.[0] === '16')
+  expect(await ui.find({ key: 'tg-reset' })).toBeUndefined()
+  await ui.press({ key: 'settings' })
+  expect(await shown()).toBe(false)
+  await ui.press({ key: 'tg-turnMax-up' })
+  expect(await shown()).toBe(true)
+  expect(await ui.find({ key: 'tg-reset' })).toBeDefined()
+  await ui.press({ key: 'tg-reset' })
+  expect(await ui.find({ key: 'tg-reset' })).toBeUndefined()
+})
