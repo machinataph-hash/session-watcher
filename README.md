@@ -136,6 +136,8 @@ What it keeps lives in session state and ends with the session. It makes **no** 
 
 - **The pane doesn't open:** check `claude --version` is 2.1.308 or later, then run `/reload-plugins` and `/session-watcher`. Look in the transcript for a dim line starting `session-watcher:`; it names what failed.
 - **`/session-watcher` isn't in the `/` menu:** type it in full. Some surfaces list a mod's commands only after it has loaded.
+- **Cloud session in the desktop app says "no-surface":** the app doesn't draw mod panes there; use the live page (`/session-watcher report`). To load a new version in a cloud session, start a new session: restarting the app reconnects to the same one, and `/reload-plugins` isn't available over a remote connection.
+- **Keep the page handy:** pin it to the claude.ai sidebar from the page, or ask Claude to pin it.
 - **No live page link:** look in Activity for a `page` line. `publish failed` says why; the Artifact tool has to be available in the session.
 - **Session Totals stay at 0 or say "Reading the transcripts…":** check `python3` is installed and on your PATH.
 
