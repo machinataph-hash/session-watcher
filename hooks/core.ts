@@ -4,8 +4,12 @@ import type { ModelUsage, SessionContextBreakdown } from 'claude-code'
 import type { Bucket, Gate, Layout, Row, Scan, Task, Usage } from '../types'
 
 export const empty = (): Usage => ({ input: 0, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0, output: 0, calls: 0, usd: 0 })
-export const mainRow = (): Row => ({ id: 'main', who: 'main thread', type: 'main', models: [], usage: empty() })
-export const newTask = (label: string, now: number): Task => ({ label, startedAt: now, main: mainRow(), agents: [] })
+export const newTask = (label: string, now: number): Task => ({
+  label,
+  startedAt: now,
+  main: { id: 'main', who: 'main thread', type: 'main', models: [], usage: empty() },
+  agents: [],
+})
 
 // List prices per million tokens, [input, output]. Only their ratios matter: the pane
 // scales every estimate so the session's total equals the engine's own cost.
@@ -17,7 +21,7 @@ const PRICES: Record<string, [number, number]> = {
   haiku: [1, 5],
 }
 export const familyOf = (model: string) => /(fable|mythos|opus|sonnet|haiku)/i.exec(model)?.[1]?.toLowerCase() ?? 'other'
-export const priceOf = (model: string): [number, number] => PRICES[familyOf(model)] ?? [3, 15]
+const priceOf = (model: string): [number, number] => PRICES[familyOf(model)] ?? [3, 15]
 
 // A cache write costs by how long the cache keeps it: five minutes at 1.25x input, one hour at 2x.
 // Counted in input-token units; usage stored before the split was kept has no cacheWrite1h and prices at 1.25x.
@@ -196,7 +200,7 @@ export const breakdownText = (b: SessionContextBreakdown) => {
 // Plan-limit estimator. The engine gives each limit as a whole percent, so the pane learns how many
 // dollars of spend one percent takes, from the spend counted between percent steps across sessions
 // (kept in $.store), and adds the spend since the last step to the shown percent.
-export type LimitTrack = { pct: number; resetsAt: number | null; spent: number; isClean: boolean }
+type LimitTrack = { pct: number; resetsAt: number | null; spent: number; isClean: boolean }
 export type LimitModel = {
   /** dollars counted by every session since the model began */
   spent: number
@@ -207,7 +211,7 @@ export type LimitModel = {
   samples: Record<string, number[]>
 }
 type LimitReading = { kind: string; pct: number; resetsAt: number | null }
-export const LIMIT_SAMPLES = 5
+const LIMIT_SAMPLES = 5
 const SEEN_DAYS = 8
 // The engine's reset time moves by milliseconds between readings; a new window moves it by hours.
 const isSameWindow = (a: number | null, b: number | null) => (a === null || b === null ? a === b : Math.abs(a - b) <= 60_000)
@@ -313,7 +317,7 @@ export const applyLayoutMessage = (l: Layout, data: unknown): Layout => {
 // ---- themes: a palette laid over the drawn tree. Without one the pane keeps the app's own colours.
 // Frostwerk: Blueprint's theme of that name (brand_tokens), its oklch values as hex.
 // Reader: the Blueprint Reader page's paper, ink and slate.
-export type Theme = {
+type Theme = {
   name: string
   bg: string
   card: string
@@ -347,8 +351,8 @@ type Node = { type?: string; props?: Record<string, unknown>; children?: unknown
  * The tree drawn in a theme: every Text takes the theme's ink (dim text its muted ink), named colours
  * become the theme's, and a bordered Box becomes a card. Pure: returns a new tree.
  */
-export const paint = <T>(node: T, t: Theme, isRoot = true): T => {
-  if (Array.isArray(node)) return node.map(c => paint(c, t, false)) as T
+export const paint = <T>(node: T, t: Theme): T => {
+  if (Array.isArray(node)) return node.map(c => paint(c, t)) as T
   const n = node as Node
   if (!n || typeof n !== 'object') return node
   const props = { ...(n.props ?? {}) }
@@ -371,13 +375,13 @@ export const paint = <T>(node: T, t: Theme, isRoot = true): T => {
   const hover = props.hover as Record<string, unknown> | undefined
   if (hover && typeof hover === 'object') {
     const h2 = { ...hover }
-    if ('borderDimColor' in h2) delete h2.borderDimColor
+    delete h2.borderDimColor
     if (h2.color !== undefined) h2.color = map(h2.color)
     if (h2.borderColor !== undefined) h2.borderColor = map(h2.borderColor)
     props.hover = h2
   }
   const out: Record<string, unknown> = { ...n, props }
-  if (n.children !== undefined) out.children = paint(n.children, t, false)
-  if (props.children !== undefined) props.children = paint(props.children, t, false)
+  if (n.children !== undefined) out.children = paint(n.children, t)
+  if (props.children !== undefined) props.children = paint(props.children, t)
   return out as T
 }

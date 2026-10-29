@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { LimitModel } from './core'
-import type { Active, AgentCard, Bucket, CacheHealth, Call, Check, Gate, Layout, Limit, LogLine, Receipt, Row, Scan, Task, Turn, Usage, Vitals } from '../types'
+import type { Active, AgentCard, CacheHealth, Call, Check, Gate, Layout, Limit, LogLine, Receipt, Row, Scan, Task, Turn, Usage, Vitals } from '../types'
 import {
   BUCKETS,
   EDIT_TOOLS,
@@ -53,8 +53,10 @@ const BREAKDOWN_TOOL = 'context_breakdown'
 
 const tasks = atom({ plugin: 'session-watcher', key: 'tasks' } as const, [] as Task[])
 const calls = atom({ plugin: 'session-watcher', key: 'calls' } as const, [] as Call[])
-const active = atom({ plugin: 'session-watcher', key: 'active' } as const, { hist: 0, ms: 0, since: null, turns: [] } as Active)
-const scan = atom({ plugin: 'session-watcher', key: 'scan' } as const, { at: 0, byModel: {}, costUsd: null } as Scan)
+const EMPTY_ACTIVE: Active = { hist: 0, ms: 0, since: null, turns: [] }
+const EMPTY_SCAN: Scan = { at: 0, byModel: {}, costUsd: null }
+const active = atom({ plugin: 'session-watcher', key: 'active' } as const, EMPTY_ACTIVE)
+const scan = atom({ plugin: 'session-watcher', key: 'scan' } as const, EMPTY_SCAN)
 const DEFAULT_VITALS: Vitals = {
   model: '',
   effort: '',
@@ -96,6 +98,7 @@ const CHIPS = 'section-chips'
 const TICKS = 'setting-ticks'
 // Clickable titles drawn on their own surface under a theme; a press posts and runs the title's action.
 const PRESS = 'press:'
+// Rebuilt by each drawing, so it holds the titles shown now and nothing older.
 const pressActions = new Map<string, () => void>()
 // Every card, outer section or inner (a task, a sub-agent), is drawn alike: sections can be moved, so
 // no card may look like a special first one. The current task is marked by its "now" tag, not its border.
@@ -103,6 +106,20 @@ const CARD = { flexDirection: 'column', borderStyle: 'single', borderDimColor: t
 // Tasks whose open state differs from their default (the current task starts open, earlier ones closed).
 const taskToggles = atom({ plugin: 'session-watcher', key: 'taskToggles' } as const, [] as number[])
 const copied = atom({ plugin: 'session-watcher', key: 'copied' } as const, '')
+
+// One layout change from any control: applied, then saved for later sessions.
+const saveLayout = async ($: EngineInterface, msg: unknown) => {
+  const l = await update($, layout, l0 => applyLayoutMessage(cleanLayout(l0), msg))
+  await $.store.set(LAYOUT, l).catch(() => undefined)
+}
+
+// When the session began, from the engine's usage; read with it, not on every drawing.
+let sessionStart: number | null = null
+// The clocks: each drawing records how finely its shown times move (a second, a minute, or not at
+// all) and when it drew; the tick redraws only once a shown time has moved. Data changes redraw
+// by themselves, since the drawing reads them through $.state.
+let tickMs = 0
+let drawnAt = 0
 
 const activeMs = (a: Active, now: number) => (a.hist ?? 0) + a.ms + (a.since === null ? 0 : now - a.since)
 
@@ -141,6 +158,7 @@ const withEstimates = ($: EngineInterface, cost: number | null, readings: Limit[
 const readUsage = async ($: EngineInterface, withLimit = false) => {
   const u = await $.session.usage(withLimit ? { breakdown: 'summary' } : undefined).catch(() => null)
   if (!u) return
+  sessionStart = u.startedAt
   const limit = u.context.breakdown?.rawMaxTokens
   const limits = await withEstimates($, u.cost?.usd ?? null, u.rateLimits.map(limitOf))
   await update($, vitals, v => ({
@@ -232,10 +250,13 @@ export const register: Register = on => {
     if (saved !== undefined) await update($, layout, () => cleanLayout(saved))
     await readUsage($, true)
     void readTranscript($)
-    // The clocks move on their own, so the pane redraws each second.
     if (!ticking) {
       ticking = true
-      $.clock.every(1000, () => $.ui.invalidate('ui.render'))
+      $.clock.every(1000, async () => {
+        if (tickMs === 0) return
+        const now = await $.clock.now()
+        if (Math.floor(now / tickMs) !== Math.floor(drawnAt / tickMs)) $.ui.invalidate('ui.render')
+      })
     }
     void $.ui.open({ id: PANE, title: 'Session Watcher' }).catch(() => undefined)
     return next(e)
@@ -252,8 +273,7 @@ export const register: Register = on => {
     if (e.element !== CHIPS && !isTicks) return next(e)
     const pick = (e.data as { pick?: unknown } | null)?.pick
     const msg = e.element === CHIPS ? e.data : pick === 'cacheBar' ? { flag: 'cacheBar' } : typeof pick === 'string' && pick.startsWith('theme:') ? { theme: pick === 'theme:app' ? null : pick.slice(6) } : null
-    const l = await update($, layout, l0 => applyLayoutMessage(cleanLayout(l0), msg))
-    await $.store.set(LAYOUT, l).catch(() => undefined)
+    await saveLayout($, msg)
     return {}
   })
 
@@ -266,8 +286,9 @@ export const register: Register = on => {
       await update($, gate, () => emptyGate())
       await update($, log, () => [])
       await update($, receipt, () => null)
-      await update($, scan, () => ({ at: 0, byModel: {}, costUsd: null }))
-      await update($, active, () => ({ hist: 0, ms: 0, since: null, turns: [] }))
+      await update($, scan, () => EMPTY_SCAN)
+      await update($, active, () => EMPTY_ACTIVE)
+      sessionStart = null
     }
     return next(e)
   })
@@ -276,6 +297,7 @@ export const register: Register = on => {
     const verb = e.args.trim().split(/\s+/)[0] || 'open'
     if (verb === 'close') {
       await $.ui.close({ id: PANE })
+      tickMs = 0
       return { text: 'Session Watcher closed.' }
     }
     if (verb === 'reset') {
@@ -535,7 +557,7 @@ export const register: Register = on => {
     const { Box, Text, Button } = ui
     // The terminal draws bars as characters; the other surfaces have a proportional font, so an SVG.
     const Svg = e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : undefined
-    const [list0, log0, note, open, toggles, act, sc, v0, cards, g0, rc, lines, tn, lay0] = await Promise.all([
+    const [list0, callList, note, open, toggles, act, sc, v0, cards, g0, rc, events, tn, lay0] = await Promise.all([
       read($, tasks),
       read($, calls),
       read($, copied),
@@ -553,13 +575,13 @@ export const register: Register = on => {
     ])
     const lay = cleanLayout(lay0)
     const now = await $.clock.now()
+    drawnAt = now
     // A session whose start was missed still has a current task to show.
     const list = list0.length > 0 ? list0 : [newTask('Unlabelled', now)]
-    let g = g0
-    let v = v0
-    g = { totals: { ...emptyGate().totals, ...(g0?.totals ?? {}) }, recent: g0?.recent ?? [] }
-    v = { ...DEFAULT_VITALS, ...v0, limits: v0?.limits ?? [] }
-    const sessionStart = await $.session.usage().then(u => u.startedAt).catch(() => list[0]?.startedAt ?? now)
+    // Values stored by an older version may lack fields added since.
+    const g: Gate = { totals: { ...emptyGate().totals, ...(g0?.totals ?? {}) }, recent: g0?.recent ?? [] }
+    const v: Vitals = { ...DEFAULT_VITALS, ...v0, limits: v0?.limits ?? [] }
+    const startedAt = sessionStart ?? list[0]?.startedAt ?? now
     // The factor comes from one snapshot: the transcript read and the engine's cost at that moment.
     const factor = factorOf(sc)
     const isCalibrated = (sc.costUsd ?? null) !== null && scanTotal(sc).usd > 0
@@ -680,6 +702,8 @@ export const register: Register = on => {
     // A clickable title. With no theme, the surface's own Button. Under a theme on a surface with Clients,
     // its own one-line surface in the theme's colours, since a desktop Button keeps the app's ink.
     const Client = 'Client' in ui ? ui.Client : undefined
+    // Only a drawing that registers presses replaces them, so a terminal draw leaves a desktop pane's presses alone.
+    if (theme && Client) pressActions.clear()
     const pressable = (key: string, runs: R[], onPress: () => void) => {
       if (theme && Client) {
         pressActions.set(`${PRESS}${key}`, onPress)
@@ -750,22 +774,20 @@ export const register: Register = on => {
     const ctxMax = v.ctxLimit > 0 ? v.ctxLimit : v.ctxWindow
     const ctxPct = v.ctxTokens !== null && ctxMax > 0 ? Math.round((100 * v.ctxTokens) / ctxMax) : v.ctxLimit > 0 ? null : v.ctxPct
     const ctxColor: BarColor = ctxPct === null ? 'inactive' : ctxPct >= 85 ? 'error' : ctxPct >= 65 ? 'warning' : 'success'
-    const runFor = now - sessionStart
+    const runFor = now - startedAt
     const actMs = activeMs(act, now)
     // ---- cache health: read from the transcripts; requests this turn from the live log
     const ch = sc.cache
-    const turnReqs = tn && tn.startedAt > 0 ? log0.filter(c => c.who === 'main thread' && c.at >= tn.startedAt).length : 0
+    const turnReqs = tn && tn.startedAt > 0 ? callList.filter(c => c.who === 'main thread' && c.at >= tn.startedAt).length : 0
     const memColor: BarColor = !ch || ch.memoryChars === null ? 'inactive' : ch.memoryChars > MEMORY_RED ? 'error' : ch.memoryChars > MEMORY_MAX ? 'warning' : 'success'
     const memWord = memColor === 'error' ? 'Bad' : memColor === 'warning' ? 'Fine' : 'Good'
-    const cacheWarnings = [
-      ...(ch && ch.memoryChars !== null && ch.memoryChars > MEMORY_MAX ? [`memory index ${k(ch.memoryChars)} chars (target ${MEMORY_MAX.toLocaleString('en-US')})`] : []),
-    ]
+    const cacheWarning = ch && ch.memoryChars !== null && ch.memoryChars > MEMORY_MAX ? `memory index ${k(ch.memoryChars)} chars (target ${MEMORY_MAX.toLocaleString('en-US')})` : null
     // The title folds away the stats row (cost, running for, active, requests); Session totals keeps cost and requests.
     const vitalsOpen = !isOpen(VITALS_FOLDED)
     const settingsOpen = isOpen(SETTINGS_OPEN)
     // The warning line takes the memory index's colour when that is what is over; else orange.
     const warnColor: BarColor = memColor === 'error' || memColor === 'warning' ? memColor : 'warning'
-    const setLayout = (msg: unknown) => update($, layout, l => applyLayoutMessage(cleanLayout(l), msg)).then(l => $.store.set(LAYOUT, l)).catch(() => undefined)
+    const setLayout = (msg: unknown) => void saveLayout($, msg).catch(() => undefined)
     const titleOf = (id: string) => SECTIONS.find(x => x.id === id)?.title ?? id
     const chipItems = lay.order.map(id => ({ id, title: titleOf(id), isShown: !lay.hidden.includes(id) }))
     // Dragging needs a Client; a surface without one (mobile) moves a section up a place by its arrow.
@@ -777,16 +799,30 @@ export const register: Register = on => {
       <Box key="chips" flexDirection="column">
         {chipItems.map((it, i) => (
           <Box key={it.id} flexDirection="row" gap={1}>
-            <Button key={`chip-${it.id}`} plain onPress={() => void update($, layout, l => applyLayoutMessage(cleanLayout(l), { toggle: it.id })).then(l => $.store.set(LAYOUT, l)).catch(() => undefined)}>
+            <Button key={`chip-${it.id}`} plain onPress={() => setLayout({ toggle: it.id })}>
               <Text dimColor={!it.isShown}>{`${it.isShown ? '☑' : '☐'} ${it.title}`}</Text>
             </Button>
             {i > 0 && (
-              <Button key={`up-${it.id}`} plain onPress={() => void update($, layout, l => applyLayoutMessage(cleanLayout(l), { move: { id: it.id, to: i - 1 } })).then(l => $.store.set(LAYOUT, l)).catch(() => undefined)}>
+              <Button key={`up-${it.id}`} plain onPress={() => setLayout({ move: { id: it.id, to: i - 1 } })}>
                 <Text dimColor>↑</Text>
               </Button>
             )}
           </Box>
         ))}
+      </Box>
+    )
+    // A labelled meter row in the Vitals card: name, bar, value, and a note on the right when wide.
+    const LABEL_W = isNarrow ? 8 : 13
+    const meterRow = (key: string, label: string, value: number, color: BarColor, shown: unknown, note: string) => (
+      <Box key={key} flexDirection="row" gap={1} alignItems="center">
+        <Box width={LABEL_W} flexShrink={0}>
+          <Text dimColor wrap="truncate-end">{label}</Text>
+        </Box>
+        <Box flexGrow={1} flexShrink={1} minWidth={0}>
+          {strip('b', [{ value, color }], { track: true, cells: Math.max(4, inner - LABEL_W - 9 - (isNarrow ? 0 : 11) - 3) })}
+        </Box>
+        {cell('p', 8, shown)}
+        {!isNarrow && cell('r', 10, <Text dimColor tabular size="footnote" wrap="truncate-end">{note}</Text>)}
       </Box>
     )
     const vitalsCard = (
@@ -817,53 +853,45 @@ export const register: Register = on => {
         </Box>
         {vitalsOpen && stats('s1', [
           stat('cost', v.costUsd !== null ? 'COST' : 'COST (EST.)', usd(v.costUsd ?? total.usd), { color: 'claude' }),
-          stat('run', 'RUNNING FOR', clock(runFor), { sub: `since ${when(sessionStart)}` }),
+          stat('run', 'RUNNING FOR', clock(runFor), { sub: `since ${when(startedAt)}` }),
           stat('act', 'ACTIVE', clock(actMs), { sub: `${runFor > 0 ? Math.round((100 * actMs) / runFor) : 0}% of the time` }),
           stat('calls', 'REQUESTS', String(total.calls), { sub: `${cards.length} sub-agent${cards.length === 1 ? '' : 's'}` }),
         ])}
         {v.limits.length > 0 && (
           <Box key="limits" flexDirection="column">
-            {v.limits.slice(0, 3).map(l => {
-              const c: BarColor = l.pct >= 85 ? 'error' : l.pct >= 60 ? 'warning' : 'suggestion'
-              const name = l.kind === 'five_hour' ? '5-hour limit' : l.kind === 'seven_day' ? '7-day limit' : l.kind.replace(/_/g, ' ')
-              return (
-                <Box key={l.kind} flexDirection="row" gap={1} alignItems="center">
-                  <Box width={isNarrow ? 8 : 13} flexShrink={0}>
-                    <Text dimColor wrap="truncate-end">{name}</Text>
-                  </Box>
-                  <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                    {strip('b', [{ value: (l.est ?? l.pct) / 100, color: c }], { track: true, cells: Math.max(4, inner - (isNarrow ? 8 : 13) - 9 - (isNarrow ? 0 : 11) - 3) })}
-                  </Box>
-                  {cell('p', 8, n(l.est != null ? `${l.est.toFixed(2)}%` : `${Math.round(l.pct)}%`, { bold: true }))}
-                  {!isNarrow && cell('r', 10, <Text dimColor tabular size="footnote" wrap="truncate-end">{l.resetsAt ? `↻ ${untilReset(Math.max(0, l.resetsAt - now))}` : ''}</Text>)}
-                </Box>
-              )
-            })}
+            {v.limits.slice(0, 3).map(l =>
+              meterRow(
+                l.kind,
+                l.kind === 'five_hour' ? '5-hour limit' : l.kind === 'seven_day' ? '7-day limit' : l.kind.replace(/_/g, ' '),
+                (l.est ?? l.pct) / 100,
+                l.pct >= 85 ? 'error' : l.pct >= 60 ? 'warning' : 'suggestion',
+                n(l.est != null ? `${l.est.toFixed(2)}%` : `${Math.round(l.pct)}%`, { bold: true }),
+                l.resetsAt ? `↻ ${untilReset(Math.max(0, l.resetsAt - now))}` : '',
+              ),
+            )}
           </Box>
         )}
         {!lay.hideCacheBar && ch && ch.memoryChars !== null && (
           <Box key="cache-bar" flexDirection="column">
-            <Box key="row" flexDirection="row" gap={1} alignItems="center">
-              <Box width={isNarrow ? 8 : 13} flexShrink={0}>
-                <Text dimColor wrap="truncate-end">Cache health</Text>
-              </Box>
-              <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                {strip('b', [{ value: Math.min(1, ch.memoryChars / MEMORY_BAR), color: memColor }], { track: true, cells: Math.max(4, inner - (isNarrow ? 8 : 13) - 9 - (isNarrow ? 0 : 11) - 3) })}
-              </Box>
-              {cell('p', 8, <Text tabular size="footnote" bold weight="semibold" color={memColor}>{memWord}</Text>)}
-              {!isNarrow && cell('r', 10, <Text dimColor tabular size="footnote" wrap="truncate-end">{k(ch.memoryChars)} chars</Text>)}
-            </Box>
+            {meterRow(
+              'row',
+              'Cache health',
+              Math.min(1, ch.memoryChars / MEMORY_BAR),
+              memColor,
+              <Text tabular size="footnote" bold weight="semibold" color={memColor}>{memWord}</Text>,
+              `${k(ch.memoryChars)} chars`,
+            )}
             <Text key="why" size="footnote" dimColor wrap="wrap">
               {`Memory index loaded into every request: ${ch.memoryChars.toLocaleString('en-US')} of ${MEMORY_BAR.toLocaleString('en-US')} chars. Good to ${MEMORY_MAX.toLocaleString('en-US')} (target), Fine to ${MEMORY_RED.toLocaleString('en-US')}, Bad past it. Start ${k(ch.first)} · ${ch.rebuildCount} rebuild${ch.rebuildCount === 1 ? '' : 's'}.`}
             </Text>
           </Box>
         )}
         <Box key="foot" flexDirection="row" gap={1} alignItems="flex-end" justifyContent="flex-end">
-          {cacheWarnings.length > 0 && (
+          {cacheWarning !== null && (
             <Box flexGrow={1} flexShrink={1} minWidth={0}>
               <Text key="cache-warn" color={warnColor} size="footnote" wrap="wrap">
                 <Text size="body">⚠</Text>
-                {` Cache: ${cacheWarnings.join(' · ')}. See Cache health.`}
+                {` Cache: ${cacheWarning}. See Cache health.`}
               </Text>
             </Box>
           )}
@@ -887,7 +915,7 @@ export const register: Register = on => {
                   pressable('cache-bar-flag', [
                     { text: lay.hideCacheBar ? '☐' : '☑', color: lay.hideCacheBar ? undefined : 'claude', dim: lay.hideCacheBar },
                     { text: '  Cache health bar in this card', dim: lay.hideCacheBar },
-                  ], () => void setLayout({ flag: 'cacheBar' }))
+                  ], () => setLayout({ flag: 'cacheBar' }))
                 )}
               </Box>
               <Box key="themes" flexDirection="column" flexShrink={0} gap={1}>
@@ -898,7 +926,7 @@ export const register: Register = on => {
                   <Box key="theme-list" flexDirection="column">
                     {themeChoices.map(o => {
                       const isOn = (lay.theme ?? 'app') === o.id
-                      return pressable(`theme-${o.id}`, [{ text: isOn ? '☑' : '☐', dim: !isOn }, { text: ` ${o.name}`, bold: isOn, dim: !isOn }], () => void setLayout({ theme: o.id === 'app' ? null : o.id }))
+                      return pressable(`theme-${o.id}`, [{ text: isOn ? '☑' : '☐', dim: !isOn }, { text: ` ${o.name}`, bold: isOn, dim: !isOn }], () => setLayout({ theme: o.id === 'app' ? null : o.id }))
                     })}
                   </Box>
                 )}
@@ -1084,7 +1112,7 @@ export const register: Register = on => {
     ]
 
     // ---- recent requests
-    const recentCalls = log0.slice(-15).reverse()
+    const recentCalls = callList.slice(-15).reverse()
     const requestsBody = () =>
       recentCalls.length === 0
         ? [<Text key="none" dimColor>No requests yet.</Text>]
@@ -1270,9 +1298,9 @@ export const register: Register = on => {
 
     // ---- activity
     const logBody = () =>
-      lines.length === 0
+      events.length === 0
         ? [<Text key="none" dimColor>Nothing yet.</Text>]
-        : lines
+        : events
             .slice(-20)
             .reverse()
             .map((l, i) => (
@@ -1291,17 +1319,22 @@ export const register: Register = on => {
       const r = await $.ui.copy({ text, surface })
       await update($, copied, () => (r.isCopied ? `Copied ${what}.` : `Copy failed (${r.reason}).`))
     }
-    const errorsNow = lines.filter(l => l.kind === 'error').length
+    const errorsNow = events.filter(l => l.kind === 'error').length
     const byId: Record<string, () => ReturnType<typeof section>> = {
       session: () => section('session', 'Session totals', `${usd(v.costUsd ?? total.usd)} · ${k(weighted(total))} weighted`, sessionBody),
       tasks: () => section('tasks', 'Tasks', `${shownTasks.length} · now: ${last?.label ?? '—'}`, tasksBody),
-      requests: () => section('requests', 'Recent requests', `${log0.length} seen`, requestsBody),
+      requests: () => section('requests', 'Recent requests', `${callList.length} seen`, requestsBody),
       agents: () => section('agents', 'Sub-agents', cards.length === 0 ? 'none' : `${running} running · ${cards.length} total`, agentsBody),
       gate: () => section('gate', 'Permissions', `${gt.allowed} ok · ${gt.asked} asked · ${gt.denied} denied`, gateBody),
       cache: () => section('cache', 'Cache health', ch ? `start ${k(ch.first)} · ${ch.rebuildCount} rebuild${ch.rebuildCount === 1 ? '' : 's'}` : '—', cacheBody),
       turn: () => section('turn', 'Last turn', rc ? `${dur(rc.durationMs)}${rc.costDelta !== null ? ` · +${usd(rc.costDelta)}` : ''}` : '—', turnBody),
-      log: () => section('log', 'Activity', errorsNow > 0 ? `${lines.length} events · ${errorsNow} errors` : `${lines.length} events`, logBody),
+      log: () => section('log', 'Activity', errorsNow > 0 ? `${events.length} events · ${errorsNow} errors` : `${events.length} events`, logBody),
     }
+
+    // Seconds move while the stats row or a running sub-agent's clock shows; else only minutes do
+    // (limit resets, task minutes).
+    const isShown = (id: string) => isOpen(id) && !lay.hidden.includes(id)
+    tickMs = vitalsOpen || (isShown('agents') && running > 0) ? 1000 : 60_000
 
     // The pane keeps the app's own background around the cards, so no second colour frames them.
     const tree = (
@@ -1310,7 +1343,7 @@ export const register: Register = on => {
         {lay.order.filter(id => !lay.hidden.includes(id)).map(id => byId[id]?.())}
         <Box key="actions" flexDirection="row" flexWrap="wrap" gap={1} alignItems="center">
           <Button key="copy-summary" label="Copy tasks (CSV)" onPress={p => void copy('the task summary', summaryCsv(list, factor), p.surface)} />
-          <Button key="copy-calls" label={`Copy ${log0.length} requests (CSV)`} onPress={p => void copy('the request log', callsCsv(log0, factor), p.surface)} />
+          <Button key="copy-calls" label={`Copy ${callList.length} requests (CSV)`} onPress={p => void copy('the request log', callsCsv(callList, factor), p.surface)} />
           {note !== '' && (
             <Text dimColor size="footnote">
               {note}
