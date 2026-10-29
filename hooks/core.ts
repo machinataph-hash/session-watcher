@@ -275,27 +275,27 @@ export const SECTIONS: { id: string; title: string }[] = [
 const SECTION_IDS = SECTIONS.map(s => s.id)
 export const defaultLayout = (): Layout => ({ order: [...SECTION_IDS], hidden: [] })
 
-// The limits set in settings: each moves by its step between min and max. Memory is chars of the
+// The limits set in settings: each moves by its step, with no upper end and nothing below one step. Memory is chars of the
 // memory index (green to Good, orange to Fine, red past it, the bar Bar wide); context and plan limits
 // are percents (orange from Warn, red from Bad); requests per turn turn red past the limit.
-export const TARGETS: { id: keyof Targets; label: string; value: number; step: number; min: number; max: number }[] = [
-  { id: 'memGood', label: 'Memory index: good to', value: 4200, step: 200, min: 1000, max: 29800 },
-  { id: 'memFine', label: 'Memory index: fine to', value: 5800, step: 200, min: 1200, max: 30000 },
-  { id: 'memBar', label: 'Memory index: bar width', value: 10000, step: 1000, min: 1200, max: 40000 },
-  { id: 'ctxWarn', label: 'Context: orange from %', value: 65, step: 5, min: 10, max: 95 },
-  { id: 'ctxBad', label: 'Context: red from %', value: 85, step: 5, min: 15, max: 100 },
-  { id: 'limWarn', label: 'Plan limits: orange from %', value: 60, step: 5, min: 10, max: 95 },
-  { id: 'limBad', label: 'Plan limits: red from %', value: 85, step: 5, min: 15, max: 100 },
-  { id: 'turnMax', label: 'Requests per turn: limit', value: 15, step: 1, min: 1, max: 200 },
+export const TARGETS: { id: keyof Targets; label: string; value: number; step: number; min: number }[] = [
+  { id: 'memGood', label: 'Memory index: good to', value: 4200, step: 200, min: 200 },
+  { id: 'memFine', label: 'Memory index: fine to', value: 5800, step: 200, min: 400 },
+  { id: 'memBar', label: 'Memory index: bar width', value: 10000, step: 1000, min: 1000 },
+  { id: 'ctxWarn', label: 'Context: orange from %', value: 65, step: 5, min: 5 },
+  { id: 'ctxBad', label: 'Context: red from %', value: 85, step: 5, min: 10 },
+  { id: 'limWarn', label: 'Plan limits: orange from %', value: 60, step: 5, min: 5 },
+  { id: 'limBad', label: 'Plan limits: red from %', value: 85, step: 5, min: 10 },
+  { id: 'turnMax', label: 'Requests per turn: limit', value: 15, step: 1, min: 1 },
 ]
 
-// Each stored limit within its own range; anything else is dropped.
+// Each stored limit kept at or above its floor; anything else is dropped.
 const savedTargets = (raw: unknown): Partial<Targets> => {
   const r = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>
   const out: Partial<Targets> = {}
   for (const d of TARGETS) {
     const v = r[d.id]
-    if (typeof v === 'number' && Number.isFinite(v)) out[d.id] = Math.max(d.min, Math.min(d.max, Math.round(v)))
+    if (typeof v === 'number' && Number.isFinite(v)) out[d.id] = Math.max(d.min, Math.round(v))
   }
   return out
 }
@@ -316,17 +316,15 @@ export const targetsOf = (l: Layout): Targets => {
   return t
 }
 
-/** Whether one step of a limit keeps it in its range and in order with the limits beside it. */
+/** Whether one step of a limit is allowed: down stops at its floor and at the limit below it; up always goes,
+ * carrying the limit above it along (see targetsOf). */
 export const canStep = (l: Layout, id: keyof Targets, by: 1 | -1): boolean => {
   const d = TARGETS.find(x => x.id === id)
   if (!d) return false
   const t = targetsOf(l)
   const v = t[id] + by * d.step
-  if (v < d.min || v > d.max) return false
-  for (const [lo, hi, gap] of ORDER) {
-    if (lo === id && by === 1 && v + gap > t[hi]) return false
-    if (hi === id && by === -1 && v < t[lo] + gap) return false
-  }
+  if (v < d.min) return false
+  for (const [lo, hi, gap] of ORDER) if (hi === id && by === -1 && v < t[lo] + gap) return false
   return true
 }
 

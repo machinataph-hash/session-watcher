@@ -426,41 +426,41 @@ for (const surface of ['terminal', 'desktop'] as const)
       expect(new Set(cards.map(look)).size).toBe(1)
     })
 
-test('targets: steps move within range, order holds, defaults are not stored, reset clears', () => {
+test('targets: no upper end, a raised limit carries the one above, defaults are not stored, reset clears', () => {
   const base = cleanLayout(undefined)
   expect(targetsOf(base).memGood).toBe(4200)
   let l = applyLayoutMessage(base, { target: { id: 'memGood', by: 1 } })
   expect(l.targets).toEqual({ memGood: 4400 })
   l = applyLayoutMessage(l, { target: { id: 'memGood', by: -1 } })
   expect(l.targets).toBeUndefined()
-  // Good stops 200 short of Fine; the step that would cross is refused and its button marked.
-  for (let i = 0; i < 10; i++) l = applyLayoutMessage(l, { target: { id: 'memGood', by: 1 } })
-  expect(targetsOf(l).memGood).toBe(5600)
-  expect(l.targets).toEqual({ memGood: 5600 })
-  expect(canStep(l, 'memGood', 1)).toBe(false)
-  expect(canStep(l, 'memFine', -1)).toBe(false)
-  expect(canStep(l, 'memFine', 1)).toBe(true)
-  // Raising Fine makes room for Good again, and lowering Fine back returns it to the stored default.
-  l = applyLayoutMessage(l, { target: { id: 'memFine', by: 1 } })
+  // Good passes 10,000 and Fine is carried 200 above it, read not stored.
+  for (let i = 0; i < 40; i++) l = applyLayoutMessage(l, { target: { id: 'memGood', by: 1 } })
+  expect(l.targets).toEqual({ memGood: 12200 })
   expect(canStep(l, 'memGood', 1)).toBe(true)
-  l = applyLayoutMessage(l, { target: { id: 'memFine', by: -1 } })
-  expect(l.targets).toEqual({ memGood: 5600 })
-  // A stored Good above the default Fine carries Fine up when read, without storing it.
-  const carried = cleanLayout({ targets: { memGood: 6000 } })
-  expect(carried.targets).toEqual({ memGood: 6000 })
-  expect(targetsOf(carried).memFine).toBe(6200)
-  expect(targetsOf(carried).memBar).toBe(10000)
-  expect(targetsOf(cleanLayout({ targets: { memGood: 99999 } })).memFine).toBeLessThanOrEqual(30000)
-  // A limit never leaves its range, and an unknown id or step changes nothing.
+  expect(targetsOf(l).memFine).toBe(12400)
+  expect(targetsOf(l).memBar).toBe(12400)
+  // The carried Fine cannot go below Good; Good coming back down brings Fine back to its default.
+  expect(canStep(l, 'memFine', -1)).toBe(false)
+  for (let i = 0; i < 40; i++) l = applyLayoutMessage(l, { target: { id: 'memGood', by: -1 } })
+  expect(l.targets).toBeUndefined()
+  expect(targetsOf(l).memFine).toBe(5800)
+  // A stored value far past the old ranges is kept as it is.
+  expect(targetsOf(cleanLayout({ targets: { memGood: 99999 } })).memFine).toBe(100199)
+  // Percents and requests go past 100 and 200; each stops only at its floor.
   let c = base
   for (let i = 0; i < 30; i++) c = applyLayoutMessage(c, { target: { id: 'ctxBad', by: 1 } })
-  expect(targetsOf(c).ctxBad).toBe(100)
+  expect(targetsOf(c).ctxBad).toBe(235)
+  let r = base
+  for (let i = 0; i < 30; i++) r = applyLayoutMessage(r, { target: { id: 'turnMax', by: -1 } })
+  expect(targetsOf(r).turnMax).toBe(1)
+  expect(canStep(r, 'turnMax', -1)).toBe(false)
   expect(applyLayoutMessage(base, { target: { id: 'nope', by: 1 } })).toEqual(base)
   expect(applyLayoutMessage(base, { target: { id: 'turnMax', by: 5 } })).toEqual(base)
   expect(applyLayoutMessage(l, { target: 'reset' }).targets).toBeUndefined()
-  // A stored value is kept when valid, clamped when out of range, dropped when not a number.
+  // A stored value is kept when valid, raised to its floor when below, dropped when not a number.
   expect(cleanLayout({ targets: { turnMax: 30 } }).targets).toEqual({ turnMax: 30 })
-  expect(cleanLayout({ targets: { turnMax: 9999 } }).targets).toEqual({ turnMax: 200 })
+  expect(cleanLayout({ targets: { turnMax: 9999 } }).targets).toEqual({ turnMax: 9999 })
+  expect(cleanLayout({ targets: { turnMax: -4 } }).targets).toEqual({ turnMax: 1 })
   expect(cleanLayout({ targets: { turnMax: 'x', nope: 3 } }).targets).toBeUndefined()
 })
 

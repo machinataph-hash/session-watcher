@@ -902,9 +902,9 @@ export const register: Register = on => {
               </Text>
             </Box>
           )}
-          {/* Title size on the surface's own Button; under a theme its one-line surface draws one size, so bold there. */}
+          {/* Title size on the surface's own Button; under a theme its one-line surface draws one size, so bold there. Never dim: full ink, accent while open. */}
           <Box key="cog" width={2} flexShrink={0}>
-            {pressable('settings', [{ text: '⚙', color: settingsOpen ? 'claude' : undefined, dim: !settingsOpen && !theme, bold: true, size: 'title' }], () => void flip(SETTINGS_OPEN))}
+            {pressable('settings', [{ text: '⚙', color: settingsOpen ? 'claude' : undefined, bold: true, size: 'title' }], () => void flip(SETTINGS_OPEN))}
           </Box>
         </Box>
         {settingsOpen && (
