@@ -101,7 +101,7 @@ const checkTree = (root: El, cols: number, surface: string) => {
   // 10.1 ticks: one glyph both ways; 10.2 the disclosure arrow is one width both ways.
   for (const n of els) {
     const t = n.type === 'Text' ? String((n.children ?? [])[0] ?? n.props?.children ?? '') : ''
-    if (/^[☑☐□▣✓✔]$/.test(t)) throw new Error(`tick glyph ${t}`)
+    if (/^[□▣✓✔]$/.test(t)) throw new Error(`tick glyph ${t}`)
     if (/^[▾▸]/.test(t)) expect(t.length).toBe(2)
   }
 }

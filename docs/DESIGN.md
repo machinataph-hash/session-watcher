@@ -34,7 +34,7 @@ tree at desktop widths 30, 60, 120 and 200 and terminal widths 80 and 140, setti
 
 ## 6. Grids (stat rows and settings groups)
 6.1 Columns span the card wall to wall and are equal: every cell grows from zero (`flexGrow 1`, width 0, `minWidth 0`), so the first column starts on the left inset and the last ends on the right inset.
-6.2 Each stat column needs at least 16 cells, each settings group 24. When all columns do not fit at that minimum the grid becomes 2-up, then 1-up.
+6.2 Each stat column needs at least 16 cells, each settings group 24. A grid shows the most columns that fit at that minimum, stepping down one column at a time (6, 5, 4, 3, 2, 1).
 6.3 Every row of a grid has the same column count and widths; a short last row is padded with empty cells, never stretched.
 6.4 All grids in one card share one column count (the card's widest row), so column edges line up from row to row; a shorter row is padded with empty cells.
 6.4 When the surface reports no width, the grid hands the reflow to the surface: cells wrap at their minimum width.
@@ -54,7 +54,7 @@ tree at desktop widths 30, 60, 120 and 200 and terminal widths 80 and 140, setti
 9.1 Label (a heading) left; a dim note then the bold value right. One helper draws every such row (Context, Total, Memory index).
 
 ## 10. Controls
-10.1 A tick is one glyph (`■`) at one size in both states: on is bold and accent, off is dim.
+10.1 A tick is `☑` when on and `☐` when off, one Unicode pair drawn in the monospaced face so both are one width. The state shows in the glyph itself, because a desktop Button ignores colour.
 10.2 A tick and its label are separated by two spaces on every list.
 10.3 The disclosure arrow is one glyph plus a space in both states (`▾ `, `▸ `). A list's arrow column is 3 cells, with a blank placeholder where no arrow shows.
 10.4 Buttons have one style: the surface's own Button; under a terminal theme, an accent `[ label ]` in the theme's ink.

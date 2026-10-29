@@ -811,7 +811,8 @@ export const register: Register = on => {
     const flip = (id: string) => update($, sections, l => (l.includes(id) ? l.filter(x => x !== id) : [...l, id]))
     // w: drawn in the monospaced face take the same room.
     // A tick box: the same character both ways (its size cannot differ); on is bold and bright, off dim.
-    const tickRun = (isOn: boolean): R => ({ text: '■', color: isOn ? 'claude' : undefined, dim: !isOn, bold: isOn, w: 1 })
+    // ☑/☐: the state must show in the glyph itself, since a desktop Button draws every run in the app's own ink.
+    const tickRun = (isOn: boolean): R => ({ text: isOn ? '☑' : '☐', color: isOn ? 'claude' : undefined, dim: !isOn, bold: isOn, w: 1 })
     // The disclosure arrow: one glyph width in both states.
     const arrowRun = (isOn: boolean): R => ({ text: isOn ? '▾ ' : '▸ ', dim: true })
     type R = { text: string; color?: string; dim?: boolean; bold?: boolean; size?: string; w?: number }
@@ -951,7 +952,9 @@ export const register: Register = on => {
           </Box>
         )
       const fits = (n: number) => n * min + (n - 1) * COL_GAP <= width
-      const per = [target, 2, 1].find(n => n <= target && fits(n)) ?? 1
+      // The most columns that fit, trying every count down from the full row (6 stats go 6, 5, 4, 3, 2, 1),
+      // so a wide pane never drops straight to 2-up while 3 or 4 would fit.
+      const per = Array.from({ length: target }, (_, i) => target - i).find(fits) ?? 1
       const rows: unknown[][] = []
       for (let i = 0; i < items.length; i += per) rows.push(items.slice(i, i + per))
       return (
@@ -1049,7 +1052,7 @@ export const register: Register = on => {
               )}
             </Box>
             <Button key={`chip-${it.id}`} plain onPress={keep('chip-' + it.id, () => setLayout({ toggle: it.id }))}>
-              <Text color={it.isShown ? 'claude' : undefined} dimColor={!it.isShown} bold={it.isShown} mono>■</Text>
+              <Text color={it.isShown ? 'claude' : undefined} dimColor={!it.isShown} bold={it.isShown} mono>{it.isShown ? '☑' : '☐'}</Text>
               <Text dimColor={!it.isShown}>{`${TICK_GAP}${it.title}`}</Text>
             </Button>
           </Box>

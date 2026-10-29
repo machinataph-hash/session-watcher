@@ -604,7 +604,7 @@ test('desktop: every card menu draws its tick Buttons without error', async ($, 
     expect(await ui.find({ type: 'Text', text: /could not draw/ })).toBeUndefined()
     for (const d of EXTRAS[id]!) {
       const tick = await ui.find({ key: `x-${id}-${d.key}` })
-      if (tick) expect(JSON.stringify(tick)).toMatch(/■|□/)
+      if (tick) expect(JSON.stringify(tick)).toMatch(/☑|☐/)
     }
   }
 })
@@ -644,13 +644,11 @@ test(`desktop: tick labels are the same length checked or not, theme ${theme ?? 
   const a0 = await node()
   await ui.press({ key: 'x-vitals-active' })
   const b0 = await node()
-  // The same character both ways; only the ink differs (on is bold).
-  expect(glyphText(a0)).toBe('■')
-  expect(glyphText(b0)).toBe('■')
+  // A checked box and an empty box from one Unicode pair, so the state shows without colour.
+  expect(glyphText(a0)).toBe('☐')
+  expect(glyphText(b0)).toBe('☑')
   expect(glyphOn(a0)).toBe(false)
   expect(glyphOn(b0)).toBe(true)
-  const a = JSON.stringify(a0)
-  expect(a).not.toMatch(/[☑☐□]/)
 })
 
 // Main settings: the move-up arrow sits left of each tick; Session Totals explains the cost gap with the real scan time.
