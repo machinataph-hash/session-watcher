@@ -127,6 +127,13 @@ A second tool, `context_breakdown`, returns the context window broken down as `/
 
 Session Watcher also publishes the pane as a private page on claude.ai, so you can follow a session where the pane can't be drawn, such as a cloud session in the desktop app. After each model request it writes its state into [`report/page.html`](report/page.html) and publishes it with the Artifact tool, at most once every 10 seconds; requests inside that wait are published when it ends, so the page never stays behind. The first publish puts the link in Activity and in a toast; later ones update the same page, and an open page picks up the update by itself.
 
+<p align="center">
+  <img src="docs/page-frostwerk.png" alt="The live page in the Frostwerk theme: Main card, Session Totals, Tasks and Recent Requests" width="260">
+  <img src="docs/page-reader.png" alt="The live page in the Reader theme" width="260">
+  <img src="docs/page-original-settings.png" alt="The live page in the Original theme with the Main card's settings open: cards, extras and theme" width="260">
+</p>
+<p align="center"><sub>The live page on claude.ai: Frostwerk (left), Reader (middle), Original with settings open (right).</sub></p>
+
 A publish is a tool call the mod makes itself, not a model request, so it costs no tokens. The page shows the same cards as the pane, drawn to [docs/DESIGN.md](docs/DESIGN.md), with the pane's own numbers: cost, context, rate limits, permissions and sub-agents. Which cards are open, their extras and the theme are kept in your browser. The page is private until you share it, and its Activity and Permissions cards show your prompts and commands.
 
 Change the page in `report/page.src.html` (or `hooks/core.ts`), then rebuild it with `node report/build.mjs`. `node --experimental-strip-types report/export.ts <session id> <folder>` rebuilds a session's state from its transcripts, for a page of a session that ran without the mod; `node report/build.mjs --preview <folder>/state.json` writes `report/preview.html` to look at.
