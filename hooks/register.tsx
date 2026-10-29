@@ -91,7 +91,7 @@ const SETTINGS_OPEN = 'settings-open'
 const layout = atom({ plugin: 'session-watcher', key: 'layout' } as const, defaultLayout() as Layout)
 const LAYOUT = 'layout'
 const CHIPS = 'section-chips'
-// The theme list and the Cache health bar flag: plain tick lists on the same kind of surface.
+// The theme list and the Cache Health bar flag: plain tick lists on the same kind of surface.
 const TICKS = 'setting-ticks'
 // Clickable titles drawn on their own surface under a theme; a press posts and runs the title's action.
 const PRESS = 'press:'
@@ -99,7 +99,7 @@ const PRESS = 'press:'
 const pressActions = new Map<string, () => void>()
 // Every card, outer section or inner (a task, a sub-agent), is drawn alike: sections can be moved, so
 // no card may look like a special first one. The current task is marked by its "now" tag, not its border.
-const CARD = { flexDirection: 'column', borderStyle: 'single', borderDimColor: true, paddingX: 1 } as const
+const CARD = { flexDirection: 'column', borderStyle: 'single', borderColor: 'inactive', paddingX: 1 } as const
 // Tasks whose open state differs from their default (the current task starts open, earlier ones closed).
 const taskToggles = atom({ plugin: 'session-watcher', key: 'taskToggles' } as const, [] as number[])
 const copied = atom({ plugin: 'session-watcher', key: 'copied' } as const, '')
@@ -791,7 +791,7 @@ export const register: Register = on => {
     const memColor: BarColor = !ch || ch.memoryChars === null ? 'inactive' : ch.memoryChars > tg.memFine ? 'error' : ch.memoryChars > tg.memGood ? 'warning' : 'success'
     const memWord = memColor === 'error' ? 'Bad' : memColor === 'warning' ? 'Fine' : 'Good'
     const cacheWarning = ch && ch.memoryChars !== null && ch.memoryChars > tg.memGood ? `memory index ${k(ch.memoryChars)} chars (target ${tg.memGood.toLocaleString('en-US')})` : null
-    // The title folds away the stats row (cost, running for, active, requests); Session totals keeps cost and requests.
+    // The title folds away the stats row (cost, running for, active, requests); Session Totals keeps cost and requests.
     const vitalsOpen = !isOpen(VITALS_FOLDED)
     const settingsOpen = isOpen(SETTINGS_OPEN)
     // The warning line takes the memory index's colour when that is what is over; else orange.
@@ -839,8 +839,8 @@ export const register: Register = on => {
         <Box key="title" flexDirection="row" flexWrap="wrap" columnGap={2} justifyContent="space-between">
           <Box flexGrow={1} flexShrink={1} minWidth={0}>
           {pressable('sec-vitals', [
-            { text: '● ', color: v.isRunning ? 'claude' : 'success', bold: true },
-            { text: v.model ? modelName(v.model) : 'Session', bold: true },
+            { text: '● ', color: v.isRunning ? 'claude' : 'success', bold: true, size: 'heading' },
+            { text: v.model ? modelName(v.model) : 'Session', bold: true, size: 'heading' },
             ...(v.effort ? [{ text: ` · ${v.effort}`, dim: true }] : []),
             ...(v.mode ? [{ text: ` · ${v.mode}`, dim: true }] : []),
           ], () => void flip(VITALS_FOLDED))}
@@ -884,7 +884,7 @@ export const register: Register = on => {
           <Box key="cache-bar" flexDirection="column">
             {meterRow(
               'row',
-              'Cache health',
+              'Cache Health',
               Math.min(1, ch.memoryChars / tg.memBar),
               memColor,
               <Text tabular size="footnote" bold weight="semibold" color={memColor}>{memWord}</Text>,
@@ -900,12 +900,12 @@ export const register: Register = on => {
             <Box flexGrow={1} flexShrink={1} minWidth={0}>
               <Text key="cache-warn" color={warnColor} size="footnote" wrap="wrap">
                 <Text size="body">⚠</Text>
-                {` Cache: ${cacheWarning}. See Cache health.`}
+                {` Cache: ${cacheWarning}. See Cache Health.`}
               </Text>
             </Box>
           )}
           {/* Title size on the surface's own Button; under a theme its one-line surface draws one size, so bold there. Never dim: full ink, accent while open. */}
-          <Box key="cog" width={2} flexShrink={0}>
+          <Box key="cog" flexShrink={0}>
             {pressable('settings', [{ text: '⚙', color: settingsOpen ? 'claude' : undefined, bold: true, size: 'title' }], () => void flip(SETTINGS_OPEN))}
           </Box>
         </Box>
@@ -920,11 +920,11 @@ export const register: Register = on => {
                 {heading('sh', 'SECTIONS · TICK TO SHOW · DRAG TO MOVE')}
                 {chips}
                 {Client ? (
-                  <Client key={`${TICKS}-flag`} module="./chips.tsx" props={{ isFixed: true, items: [{ id: 'cacheBar', title: 'Cache health bar in this card', isShown: !lay.hideCacheBar }], ...palette }} height={1} />
+                  <Client key={`${TICKS}-flag`} module="./chips.tsx" props={{ isFixed: true, items: [{ id: 'cacheBar', title: 'Cache Health bar in this card', isShown: !lay.hideCacheBar }], ...palette }} height={1} />
                 ) : (
                   pressable('cache-bar-flag', [
                     { text: lay.hideCacheBar ? '☐' : '☑', color: lay.hideCacheBar ? undefined : 'claude', dim: lay.hideCacheBar },
-                    { text: '  Cache health bar in this card', dim: lay.hideCacheBar },
+                    { text: '  Cache Health bar in this card', dim: lay.hideCacheBar },
                   ], () => setLayout({ flag: 'cacheBar' }))
                 )}
               </Box>
@@ -1015,7 +1015,7 @@ export const register: Register = on => {
     const byModel = Object.entries(sc.byModel)
       .flatMap(([m, x]) => [
         { id: `${m}-main`, who: 'Main thread', model: m, u: x.main, color: 'text' as BarColor },
-        { id: `${m}-agents`, who: 'Sub-agents', model: m, u: x.agents, color: FAMILY[familyOf(m)] ?? ('permission' as BarColor) },
+        { id: `${m}-agents`, who: 'Sub-Agents', model: m, u: x.agents, color: FAMILY[familyOf(m)] ?? ('permission' as BarColor) },
       ])
       .filter(r => r.u.calls > 0)
       .sort((a, b) => b.u.usd - a.u.usd)
@@ -1349,13 +1349,13 @@ export const register: Register = on => {
     }
     const errorsNow = events.filter(l => l.kind === 'error').length
     const byId: Record<string, () => ReturnType<typeof section>> = {
-      session: () => section('session', 'Session totals', `${usd(v.costUsd ?? total.usd)} · ${k(weighted(total))} weighted`, sessionBody),
+      session: () => section('session', 'Session Totals', `${usd(v.costUsd ?? total.usd)} · ${k(weighted(total))} weighted`, sessionBody),
       tasks: () => section('tasks', 'Tasks', `${shownTasks.length} · now: ${last?.label ?? '—'}`, tasksBody),
-      requests: () => section('requests', 'Recent requests', `${callList.length} seen`, requestsBody),
-      agents: () => section('agents', 'Sub-agents', cards.length === 0 ? 'none' : `${running} running · ${cards.length} total`, agentsBody),
+      requests: () => section('requests', 'Recent Requests', `${callList.length} seen`, requestsBody),
+      agents: () => section('agents', 'Sub-Agents', cards.length === 0 ? 'none' : `${running} running · ${cards.length} total`, agentsBody),
       gate: () => section('gate', 'Permissions', `${gt.allowed} ok · ${gt.asked} asked · ${gt.denied} denied`, gateBody),
-      cache: () => section('cache', 'Cache health', ch ? `start ${k(ch.first)} · ${ch.rebuildCount} rebuild${ch.rebuildCount === 1 ? '' : 's'}` : '—', cacheBody),
-      turn: () => section('turn', 'Last turn', rc ? `${dur(rc.durationMs)}${rc.costDelta !== null ? ` · +${usd(rc.costDelta)}` : ''}` : '—', turnBody),
+      cache: () => section('cache', 'Cache Health', ch ? `start ${k(ch.first)} · ${ch.rebuildCount} rebuild${ch.rebuildCount === 1 ? '' : 's'}` : '—', cacheBody),
+      turn: () => section('turn', 'Last Turn', rc ? `${dur(rc.durationMs)}${rc.costDelta !== null ? ` · +${usd(rc.costDelta)}` : ''}` : '—', turnBody),
       log: () => section('log', 'Activity', errorsNow > 0 ? `${events.length} events · ${errorsNow} errors` : `${events.length} events`, logBody),
     }
 

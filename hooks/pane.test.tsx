@@ -30,7 +30,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     // Tasks is open by default: the task and its main-thread row show.
     expect(await ui.find({ type: 'Text', text: /A1 build/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^Main thread$/ })).toBeDefined()
-    // Recent requests starts closed; pressing it shows the request, pressing again hides it.
+    // Recent Requests starts closed; pressing it shows the request, pressing again hides it.
     expect(await ui.find({ type: 'Text', text: /^Main( ·|$)/ })).toBeUndefined()
     await ui.press({ key: 'sec-requests' })
     expect(await ui.find({ type: 'Text', text: /^Main( ·|$)/ })).toBeDefined()
@@ -106,7 +106,7 @@ test('cache writes are priced by cache length', async () => {
   expect(weighted({ input: 0, cacheWrite: 1000, cacheRead: 0, output: 0, calls: 1, usd: 0 })).toBe(1250)
 })
 
-// Cache health shows the transcript's figures, and a limit passed shows in the always-shown Vitals card.
+// Cache Health shows the transcript's figures, and a limit passed shows in the always-shown Vitals card.
 test('cache health section and its Vitals line', async ($, on) => {
   mock.clock(on)
   const cache = {
@@ -164,7 +164,7 @@ test(`${surface}: the Vitals stats row folds away`, async ($, on) => {
   expect(await ui.find({ type: 'Text', text: /^RUNNING FOR$/ })).toBeDefined()
 })
 
-// Requests this turn are shown in Cache health only; Vitals carries no turn-count warning.
+// Requests this turn are shown in Cache Health only; Vitals carries no turn-count warning.
 test('requests this turn past 15 no longer warn in Vitals', async ($, on) => {
   mock.clock(on, { now: 1_000_000 })
   on('turn.step', async function* () {
@@ -288,8 +288,8 @@ for (const surface of ['terminal', 'desktop'] as const)
     expect(await ui.find({ type: 'Text', text: /SECTIONS · TICK/ })).toBeUndefined()
   })
 
-// The theme is a dropdown; the Cache health bar flag is a Button. Both picks are saved.
-test('desktop: a theme tick picks a theme, and the Cache health bar flag flips', async ($, on) => {
+// The theme is a dropdown; the Cache Health bar flag is a Button. Both picks are saved.
+test('desktop: a theme tick picks a theme, and the Cache Health bar flag flips', async ($, on) => {
   mock.clock(on)
   mock.store(on)
   await start($, on)

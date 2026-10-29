@@ -263,13 +263,13 @@ export const estimateLimit = (m: LimitModel, l: LimitReading): number | null => 
 
 // The pane's section layout: which sections show and in what order. Vitals is not in it; it always shows.
 export const SECTIONS: { id: string; title: string }[] = [
-  { id: 'session', title: 'Session totals' },
+  { id: 'session', title: 'Session Totals' },
   { id: 'tasks', title: 'Tasks' },
-  { id: 'requests', title: 'Recent requests' },
-  { id: 'agents', title: 'Sub-agents' },
+  { id: 'requests', title: 'Recent Requests' },
+  { id: 'agents', title: 'Sub-Agents' },
   { id: 'gate', title: 'Permissions' },
-  { id: 'cache', title: 'Cache health' },
-  { id: 'turn', title: 'Last turn' },
+  { id: 'cache', title: 'Cache Health' },
+  { id: 'turn', title: 'Last Turn' },
   { id: 'log', title: 'Activity' },
 ]
 const SECTION_IDS = SECTIONS.map(s => s.id)
@@ -403,7 +403,7 @@ type Theme = {
 export const THEMES: Record<string, Theme> = {
   frostwerk: {
     name: 'Frostwerk',
-    bg: '#02060d', card: '#070e17', fg: '#e8ebef', muted: '#848d98', border: '#222933',
+    bg: '#02060d', card: '#070e17', fg: '#e8ebef', muted: '#848d98', border: '#343d4a',
     keys: {
       claude: '#00c2e8', suggestion: '#00c2e8', success: '#4bc98f', warning: '#fb7c00', error: '#db4241',
       text: '#b9d3db', merged: '#9e91e4', bashBorder: '#fb7c00', planMode: '#5b748e', inactive: '#848d98', permission: '#9e91e4',
@@ -411,7 +411,7 @@ export const THEMES: Record<string, Theme> = {
   },
   reader: {
     name: 'Reader',
-    bg: '#efe8db', card: '#f7f3ea', fg: '#2f2c28', muted: '#8b8375', border: '#d8cebc',
+    bg: '#efe8db', card: '#f7f3ea', fg: '#2f2c28', muted: '#8b8375', border: '#c3b69f',
     keys: {
       claude: '#46545c', suggestion: '#46545c', success: '#5b7a4a', warning: '#8a5a1f', error: '#a1463a',
       text: '#5e584f', merged: '#7a5e86', bashBorder: '#a1463a', planMode: '#4f7470', inactive: '#b3aa9a', permission: '#6a6f94',
@@ -440,7 +440,7 @@ export const paint = <T>(node: T, t: Theme): T => {
     if (props.backgroundColor !== undefined) props.backgroundColor = map(props.backgroundColor)
   } else if (n.type === 'Box') {
     if (props.borderStyle !== undefined) {
-      props.borderColor = props.borderColor !== undefined ? map(props.borderColor) : t.border
+      props.borderColor = props.borderColor !== undefined && props.borderColor !== 'inactive' ? map(props.borderColor) : t.border
       delete props.borderDimColor
       props.backgroundColor = t.card
     } else if (props.backgroundColor !== undefined) props.backgroundColor = map(props.backgroundColor)
@@ -450,7 +450,7 @@ export const paint = <T>(node: T, t: Theme): T => {
     const h2 = { ...hover }
     delete h2.borderDimColor
     if (h2.color !== undefined) h2.color = map(h2.color)
-    if (h2.borderColor !== undefined) h2.borderColor = map(h2.borderColor)
+    if (h2.borderColor !== undefined) h2.borderColor = h2.borderColor === 'inactive' ? t.border : map(h2.borderColor)
     props.hover = h2
   }
   const out: Record<string, unknown> = { ...n, props }
