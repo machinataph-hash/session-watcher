@@ -10,6 +10,10 @@ It builds on the token-use mod and takes ideas from [Flightdeck](https://github.
 </p>
 <p align="center"><sub>The Original theme (left) and Frostwerk (right).</sub></p>
 
+## Design
+
+The layout follows a short set of written rules: [docs/DESIGN.md](docs/DESIGN.md). Tests check every rule on every card.
+
 ## Install
 
 At the prompt of a Claude Code terminal session:
