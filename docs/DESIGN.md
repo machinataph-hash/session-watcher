@@ -30,6 +30,7 @@ tree at desktop widths 30, 60, 120 and 200 and terminal widths 80 and 140, setti
 5.1 All text meets WCAG AA: 4.5:1 against the background it sits on; glyphs and bars at least 3:1.
 5.2 The Original theme uses only the app's named, adaptive colours, so it reads in the app's light and dark modes. No fixed white or black.
 5.3 Themes repaint only where every control takes the theme's ink (the terminal). A desktop Button keeps the app's ink, so the desktop keeps the app's colours in every theme.
+5.5 Each theme has one accent colour (`accent` in `hooks/core.ts` THEMES): every ⚙ on every card is always drawn in it, as are cost figures, focus rings and hovers. Original: the app's orange (`claude`). Frostwerk: blue `#00c2e8`. Reader: slate `#46545c`. A new theme sets `accent` along with bg, card, fg, muted and border.
 5.4 Every theme ink is at least 4.5:1 against the theme's card and page background.
 
 ## 6. Grids (stat rows and settings groups)

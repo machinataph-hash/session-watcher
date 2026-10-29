@@ -141,7 +141,7 @@ const pressable = (runs, onPress, label) => h('button', { class: 'p', onclick: o
   runs.map(r => h('span', { class: `${r.bold ? 'b' : ''} ${r.dim ? 'dim' : ''} ${r.mono ? 'mono' : ''} ${r.cls || ''}`, style: r.color ? `color:var(--${r.color})` : undefined }, r.text)))
 const arrowRun = on => ({ text: on ? '▾ ' : '▸ ', dim: true })
 const tickRun = on => ({ text: on ? '☑' : '☐', color: on ? 'claude' : undefined, dim: !on, bold: on, mono: true })
-const cog = (on, onPress) => pressable([{ text: '⚙', color: on ? 'claude' : undefined, cls: 'cog' }], onPress, 'Card settings')
+const cog = (on, onPress) => pressable([{ text: '⚙', color: 'claude', cls: 'cog' }], onPress, 'Card settings')
 const extraTicks = card => h('div', { class: 'col ind' }, (EXTRAS[card] || []).map(d => {
   const on = extrasOf(card)[d.key]
   return pressable([tickRun(on), { text: `  ${d.label}`, dim: !on }], () => { lay.cards[card] = { ...(lay.cards[card] || {}), [d.key]: !on }; save(); draw() })
@@ -171,6 +171,7 @@ function draw() {
     const s = document.documentElement.style
     for (const [a, b] of [['bg', theme.bg], ['card', theme.card], ['fg', theme.fg], ['muted', theme.muted], ['border', theme.border]]) s.setProperty(`--${a}`, b)
     for (const [a, b] of Object.entries(theme.keys)) s.setProperty(`--${a}`, b)
+    s.setProperty('--claude', theme.accent)
     document.documentElement.style.colorScheme = theme.name === 'Reader' ? 'light' : 'dark'
   } else document.documentElement.removeAttribute('style')
 

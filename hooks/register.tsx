@@ -934,7 +934,7 @@ export const register: Register = on => {
     const setLayout = (msg: unknown) => void saveLayout($, msg).catch(() => undefined)
     const palette = theme ? { palette: { bg: theme.card, fg: theme.fg, muted: theme.muted, accent: theme.keys.claude ?? theme.fg } } : {}
     // The cog that opens a card's own menu: full ink, accent while open.
-    const cog = (key: string, isOn: boolean, onPress: () => void, size = 'title') => pressable(key, [{ text: '⚙', color: isOn ? 'claude' : undefined, bold: true, size }], onPress)
+    const cog = (key: string, isOn: boolean, onPress: () => void, size = 'title') => pressable(key, [{ text: '⚙', color: 'claude', bold: true, size }], onPress)
     // A card's extras as ticks: a Client tick list where there is one, else one Button per extra.
     const extraTicks = (card: string) => {
       const ex = extrasOf(lay, card)

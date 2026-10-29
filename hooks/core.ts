@@ -445,6 +445,9 @@ export const applyLayoutMessage = (l: Layout, data: unknown): Layout => {
 // ---- themes: a palette laid over the drawn tree. Without one the pane keeps the app's own colours.
 // Frostwerk: Blueprint's theme of that name (brand_tokens), its oklch values as hex.
 // Reader: the Blueprint Reader page's paper, ink and slate.
+// A new theme sets the same fields. `accent` is the theme's one highlight colour: every ⚙, the cost figures,
+// focus rings and hovers take it (as the `claude` key). The Original theme (no theme set) uses the app's own
+// orange. Rules: docs/DESIGN.md 5.5.
 type Theme = {
   name: string
   bg: string
@@ -452,13 +455,15 @@ type Theme = {
   fg: string
   muted: string
   border: string
+  /** the theme's highlight: every ⚙, cost figures, focus rings; `keys.claude` is set to it */
+  accent: string
   /** theme keys the pane names, and what each becomes */
   keys: Record<string, string>
 }
 export const THEMES: Record<string, Theme> = {
   frostwerk: {
     name: 'Frostwerk',
-    bg: '#02060d', card: '#070e17', fg: '#e8ebef', muted: '#848d98', border: '#2b333f',
+    bg: '#02060d', card: '#070e17', fg: '#e8ebef', muted: '#848d98', border: '#2b333f', accent: '#00c2e8',
     keys: {
       claude: '#00c2e8', suggestion: '#00c2e8', success: '#4bc98f', warning: '#fb7c00', error: '#ee5f5d',
       text: '#b9d3db', merged: '#9e91e4', bashBorder: '#fb7c00', planMode: '#7d97b3', inactive: '#848d98', permission: '#9e91e4',
@@ -466,7 +471,7 @@ export const THEMES: Record<string, Theme> = {
   },
   reader: {
     name: 'Reader',
-    bg: '#efe8db', card: '#f7f3ea', fg: '#2f2c28', muted: '#655e52', border: '#cdc2ae',
+    bg: '#efe8db', card: '#f7f3ea', fg: '#2f2c28', muted: '#655e52', border: '#cdc2ae', accent: '#46545c',
     keys: {
       claude: '#46545c', suggestion: '#46545c', success: '#4b6a3c', warning: '#8a5a1f', error: '#a1463a',
       text: '#5e584f', merged: '#7a5e86', bashBorder: '#a1463a', planMode: '#456865', inactive: '#6f6759', permission: '#585d84',
@@ -484,7 +489,7 @@ export const paint = <T>(node: T, t: Theme): T => {
   const n = node as Node
   if (!n || typeof n !== 'object') return node
   const props = { ...(n.props ?? {}) }
-  const map = (c: unknown) => (typeof c === 'string' ? (t.keys[c] ?? c) : c)
+  const map = (c: unknown) => (typeof c === 'string' ? (c === 'claude' ? t.accent : t.keys[c] ?? c) : c)
   if (n.type === 'Text') {
     if (props.color !== undefined) props.color = map(props.color)
     else props.color = props.dimColor ? t.muted : t.fg
