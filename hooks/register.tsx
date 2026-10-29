@@ -99,7 +99,7 @@ const PRESS = 'press:'
 const pressActions = new Map<string, () => void>()
 // Every card, outer section or inner (a task, a sub-agent), is drawn alike: sections can be moved, so
 // no card may look like a special first one. The current task is marked by its "now" tag, not its border.
-const CARD = { flexDirection: 'column', borderStyle: 'single', borderColor: 'inactive', paddingX: 1 } as const
+const CARD = { flexDirection: 'column', borderStyle: 'single', borderColor: 'inactive', borderDimColor: true, paddingX: 1 } as const
 // Tasks whose open state differs from their default (the current task starts open, earlier ones closed).
 const taskToggles = atom({ plugin: 'session-watcher', key: 'taskToggles' } as const, [] as number[])
 const copied = atom({ plugin: 'session-watcher', key: 'copied' } as const, '')
