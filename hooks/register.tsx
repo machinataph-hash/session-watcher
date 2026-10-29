@@ -790,10 +790,11 @@ export const register: Register = on => {
         </Box>
       )
     }
-    // A thin rule across the card, longer than any pane, held to one line by its box.
+    // A thin rule across the card: one line of dashes longer than any pane, cut at the edge. It must truncate, not wrap:
+    // the desktop does not clip a wrapped text to its box height, so a wrapping rule drew as two lines on some widths.
     const rule = (key: string) => (
       <Box key={key} height={1} overflow="hidden">
-        <Text dimColor wrap="wrap">{'─'.repeat(Math.max(inner, 600))}</Text>
+        <Text dimColor wrap="truncate-end">{'─'.repeat(Math.max(inner, 600))}</Text>
       </Box>
     )
 
