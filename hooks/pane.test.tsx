@@ -507,43 +507,6 @@ test('targets: the Cache card menu steps a limit and the bars use it', async ($,
   expect(await ui.find({ key: 'tg-reset' })).toBeUndefined()
 })
 
-// The Vitals stats never land one to a line at a width they fit: on desktop the surface wraps them by its own
-// width, whatever width the first draw reports; in the terminal two halves sit on one line with no gap between.
-for (const bodyColumns of [24, 48, 120])
-  test(`stats: desktop packs fixed-width columns from the left at ${bodyColumns} columns`, async ($, on) => {
-    mock.clock(on)
-    await start($, on)
-    const ui = await mount($, 'desktop', bodyColumns)
-    const boxes = (await ui.findAll({ type: 'Box' })) as any[]
-    const rows = boxes.filter(b => b.props?.flexDirection === 'row' && b.props?.rowGap === 1 && b.props?.columnGap !== undefined && b.props?.flexWrap !== undefined)
-    expect(rows.length).toBeGreaterThan(0)
-    for (const r of rows) expect([r.props.flexWrap, r.props.justifyContent]).toEqual(['wrap', 'flex-start'])
-    // Every stat column is one width, so columns line up across rows and cards.
-    const cols = boxes.filter(b => b.props?.flexDirection === 'column' && b.props?.flexShrink === 0 && typeof b.props?.width === 'number')
-    expect(cols.length).toBeGreaterThan(0)
-    expect(new Set(cols.map(b => b.props.width)).size).toBe(1)
-    expect(boxes.filter(b => b.props?.width === '50%' || (b.props?.width === '100%' && b.props?.flexDirection === 'column' && b.props?.flexShrink === 0))).toHaveLength(0)
-  })
-
-test('stats: the terminal uses the same fixed-width columns as the desktop', async ($, on) => {
-  mock.clock(on)
-  await start($, on)
-  const ui = await mount($, 'terminal', 48)
-  const boxes = (await ui.findAll({ type: 'Box' })) as any[]
-  expect(boxes.filter(b => b.props?.width === '50%')).toHaveLength(0)
-  expect(boxes.filter(b => b.props?.flexDirection === 'column' && b.props?.flexShrink === 0 && b.props?.width === 20).length).toBeGreaterThan(2)
-})
-
-// The Main card's settings reflow: at a narrow terminal width each group takes the full row, nothing is wider than the pane.
-test('settings: groups stack at a narrow width and fit', async ($, on) => {
-  mock.clock(on)
-  await start($, on)
-  const ui = await mount($, 'terminal', 30)
-  await ui.press({ key: 'settings' })
-  for (const key of ['cards', 'main-extras', 'themes']) expect(((await ui.find({ key })) as any)?.props?.width).toBe('100%')
-  expect(await ui.find({ type: 'Text', text: /^THEME$/ })).toBeDefined()
-})
-
 // Session Totals: no weighted figure in Main; the snapshot total and main/agent rows from one read add up.
 test('session totals: parts from one snapshot add up to the shown total; Main has cost per request and no weighted', async ($, on) => {
   mock.clock(on)
@@ -667,20 +630,6 @@ test('desktop: Main gear in its title row; Open all / Collapse all opens and clo
   // Only Main's own menu (the one holding the Button) stays.
   expect(await ui.findAll({ key: 'menu' })).toHaveLength(1)
   expect(JSON.stringify(await ui.find({ key: 'menu' }))).toContain('Open all')
-})
-
-// Permissions: fixed column widths at narrow and wide panes.
-for (const cols of [30, 120])
-test(`desktop: Permissions columns are fixed width at ${cols} columns`, async ($, on) => {
-  mock.clock(on)
-  mock.store(on, { layout: { order: ['gate'], hidden: [], sample: true } })
-  await start($, on)
-  const ui = await $.ui.mount({ plugin: 'session-watcher', surface: 'desktop', component: 'Pane', requestId: 'session-watcher', props: { ...pane, bodyColumns: cols } })
-  await ui.press({ key: 'sec-gate' })
-  const head = JSON.stringify((await ui.findAll({ key: 'head' })).find(h => JSON.stringify(h).includes('ALLOWED')))
-  expect(head).toContain('"width":9')
-  expect(head.match(/"width":8/g)).toHaveLength(3)
-  expect(await ui.find({ type: 'Text', text: /could not draw/ })).toBeUndefined()
 })
 
 // Tick boxes: plain ASCII of one length in both states, in every theme.

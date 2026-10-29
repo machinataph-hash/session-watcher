@@ -77,11 +77,27 @@ const checkTree = (root: El, cols: number, surface: string) => {
     const t = textOf(n).trim()
     if (/^[$\d][\d.,]*[k%M]?$|^—$/.test(t)) expect(n.props.justifyContent).toBe('flex-end')
   }
-  // 6 stat columns: one width (or the full row when the pane is narrower than one).
-  const statRows = els.filter(n => n.type === 'Box' && n.props?.flexWrap === 'wrap' && n.props?.rowGap === 1 && kids(n).some(c => c.props?.flexDirection === 'column' && c.props?.flexShrink === 0 && keyOf(c) !== 'cards'))
-  const statW = new Set(statRows.flatMap(r => kids(r).filter(c => c.props?.flexShrink === 0 && !['cards', 'main-extras', 'sample', 'themes'].includes(String(keyOf(c)))).map(c => c.props?.width)))
-  if (statRows.length > 0) expect(statW.size).toBe(1)
-  for (const r of statRows) expect(r.props!.justifyContent).toBe('flex-start')
+  // 6 grids (stats, settings groups): every cell grows from zero, so a row's columns are equal and span wall to wall;
+  // every row of one grid has the same number of cells.
+  const isCell = (c: El) => c.type === 'Box' && c.props?.flexGrow === 1 && c.props?.width === 0 && c.props?.minWidth === 0
+  const grids = els.filter(n => n.type === 'Box' && n.props?.flexDirection === 'column' && kids(n).length > 0 && kids(n).every(r => /^row\d+$/.test(String(keyOf(r)))))
+  for (const g of grids) {
+    const counts = kids(g).map(r => kids(r).length)
+    expect(new Set(counts).size).toBe(1)
+    for (const r of kids(g)) for (const c of kids(r)) expect(isCell(c)).toBe(true)
+  }
+  // With the width known, no grid falls back to the surface's own wrapping (which can leave a ragged last row).
+  if (cols > 0) expect(els.some(n => n.type === 'Box' && n.props?.flexWrap === 'wrap' && kids(n).some(c => c.props?.flexGrow === 1 && (c.props?.minWidth ?? 0) > 0))).toBe(false)
+  // 7 tables: header cells carry their column's own props; one free column grows, numeric columns right-aligned.
+  for (const n of els) {
+    const k = kids(n)
+    const head = k.find(c => keyOf(c) === 'head' && c.props?.flexDirection === 'row')
+    if (!head || n.props?.flexDirection !== 'column') continue
+    const defs = (r: El) => JSON.stringify(kids(r).map(c => [c.props?.width, c.props?.flexGrow, c.props?.justifyContent]))
+    for (const r of k) if (r !== head && r.type === 'Box' && r.props?.flexDirection === 'row' && keyOf(r) !== 'split') expect(defs(r)).toBe(defs(head))
+    expect(kids(head).filter(c => c.props?.flexGrow === 1).length).toBe(1)
+    for (const c of kids(head)) if (c.props?.width === 8) expect(c.props?.justifyContent).toBe('flex-end')
+  }
   // 10.1 ticks: one glyph both ways; 10.2 the disclosure arrow is one width both ways.
   for (const n of els) {
     const t = n.type === 'Text' ? String((n.children ?? [])[0] ?? n.props?.children ?? '') : ''
@@ -102,6 +118,8 @@ for (const { surface, cols } of CASES)
       const open = (await ui.drawn()) as El
       checkTree(open, cols, surface)
       expect((await ui.findAll({ key: 'menu' })).length).toBeGreaterThan(5)
+      // The stat rows and the settings groups are drawn as equal-column grids.
+      expect((await ui.findAll({ key: 'row0' })).length).toBeGreaterThan(2)
       expect(await ui.find({ type: 'Text', text: /could not draw/ })).toBeUndefined()
       await ui.press({ key: 'toggle-all' })
       await ui.press({ key: 'settings' })
