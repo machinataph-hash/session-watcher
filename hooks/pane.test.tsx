@@ -490,7 +490,7 @@ for (const bodyColumns of [24, 48, 120])
     const rows = boxes.filter(b => b.props?.flexDirection === 'row' && b.props?.rowGap === 1 && b.props?.columnGap !== undefined && b.props?.flexWrap !== undefined)
     expect(rows.length).toBeGreaterThan(0)
     for (const r of rows) expect([r.props.flexWrap, r.props.justifyContent]).toEqual(['wrap', 'space-between'])
-    expect(boxes.filter(b => b.props?.width === '50%' || b.props?.width === '100%' && b.props?.flexDirection === 'column' && b.props?.flexShrink === 0)).toHaveLength(0)
+    expect(boxes.filter(b => b.props?.width === '50%' || (b.props?.width === '100%' && b.props?.flexDirection === 'column' && b.props?.flexShrink === 0))).toHaveLength(0)
   })
 
 test('stats: terminal halves have no gap between them', async ($, on) => {
