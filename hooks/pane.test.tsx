@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 import Chips from './chips'
-import { applyLayoutMessage, extrasOf, breakdownText, canStep, cleanLayout, defaultLayout, targetsOf, emptyLimitModel, estimateLimit, fromModel, paint, THEMES, stepLimitModel, usdOf, weighted } from './core'
+import { EXTRAS, applyLayoutMessage, extrasOf, breakdownText, canStep, cleanLayout, defaultLayout, targetsOf, emptyLimitModel, estimateLimit, fromModel, paint, THEMES, stepLimitModel, usdOf, weighted } from './core'
 
 const pane = { title: '', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} } as const
 const usage = { model: 'claude-opus-5-5', input_tokens: 1000, output_tokens: 2000, cache_read_input_tokens: 100000, cache_creation_input_tokens: 4000 }
@@ -573,4 +573,69 @@ test('session totals: with no cost in the snapshot, the parts still add up to th
   // List price: $10 main + $5 agents = $15, shown as the total.
   expect(await ui.find({ type: 'Text', text: /main \$10\.00 · agents \$5\.00/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^\$15\.00$/ })).toBeDefined()
+})
+
+// Desktop: the 5-hour and 7-day rows show even before a reading; the first-token tick toggles and the value follows.
+test('desktop: plan-limit rows always show; the first-token tick toggles its value', async ($, on) => {
+  mock.clock(on)
+  mock.store(on)
+  await start($, on)
+  const ui = await mount($, 'desktop')
+  expect(await ui.find({ type: 'Text', text: /^5-hour limit$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^7-day limit$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /first token/ })).toBeUndefined()
+  await ui.press({ key: 'settings' })
+  await ui.press({ key: 'x-vitals-ttft' })
+  expect(await ui.find({ type: 'Text', text: /first token/ })).toBeDefined()
+  await ui.press({ key: 'x-vitals-ttft' })
+  expect(await ui.find({ type: 'Text', text: /first token/ })).toBeUndefined()
+})
+
+// Desktop: every card's ⚙ opens at least one setting, with the separator under the options.
+test('desktop: every card with a settings icon shows a setting; the separator sits last', async ($, on) => {
+  mock.clock(on)
+  mock.store(on)
+  await start($, on)
+  const ui = await mount($, 'desktop')
+  for (const id of ['session', 'tasks', 'requests', 'agents', 'gate', 'cache', 'turn', 'log']) {
+    if (!(await ui.find({ key: `cfg-${id}` }))) continue
+    await ui.press({ key: `cfg-${id}` })
+    const first = EXTRAS[id]?.[0]?.key
+    if (first) expect(await ui.find({ key: `x-${id}-${first}` })).toBeDefined()
+    const menu = JSON.stringify(await ui.find({ key: 'menu' }))
+    expect(menu.lastIndexOf('"sep"')).toBeGreaterThan(menu.lastIndexOf(`x-${id}-`))
+  }
+})
+
+// Sample data: off by default, saved in the layout, fills empty cards with labelled values.
+test('desktop: Sample data tick fills empty cards and is saved', async ($, on) => {
+  mock.clock(on)
+  mock.store(on)
+  await start($, on)
+  const ui = await mount($, 'desktop')
+  expect(await ui.find({ type: 'Text', text: /Sample/ })).toBeUndefined()
+  await ui.press({ key: 'settings' })
+  await ui.press({ key: 'sample-data' })
+  expect(await ui.find({ type: 'Text', text: /SAMPLE DATA is on/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^5-hour limit$/ })).toBeDefined()
+  expect(JSON.stringify(await ui.find({ key: 'sample-data' }))).toContain('☑')
+  expect(applyLayoutMessage(defaultLayout(), { sample: true }).sample).toBe(true)
+  expect(cleanLayout({ sample: true }).sample).toBe(true)
+  expect(cleanLayout({}).sample).toBeUndefined()
+})
+
+// Every card's extras draw with settings open on desktop (a Button holds only strings and Text), ticks in one face.
+test('desktop: every card menu draws its tick Buttons without error', async ($, on) => {
+  mock.clock(on)
+  mock.store(on)
+  await start($, on)
+  const ui = await mount($, 'desktop')
+  for (const id of Object.keys(EXTRAS)) {
+    if (await ui.find({ key: `cfg-${id}` })) await ui.press({ key: `cfg-${id}` })
+    expect(await ui.find({ type: 'Text', text: /could not draw/ })).toBeUndefined()
+    for (const d of EXTRAS[id]!) {
+      const tick = await ui.find({ key: `x-${id}-${d.key}` })
+      if (tick) expect(JSON.stringify(tick)).toMatch(/☑|☐/)
+    }
+  }
 })

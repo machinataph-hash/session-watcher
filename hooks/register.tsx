@@ -14,6 +14,7 @@ import {
   dur,
   empty,
   emptyGate,
+  sampleData,
   SECTIONS,
   EXTRAS,
   extrasOf,
@@ -103,6 +104,8 @@ const MENU = 'menu:'
 const PRESS = 'press:'
 // Rebuilt by each drawing, so it holds the titles shown now and nothing older.
 const pressActions = new Map<string, () => void>()
+// The same for every Button drawn, by its key, so a press the host cannot match to a live handle still runs.
+const buttonActions = new Map<string, (p: never) => void>()
 // Every card, outer section or inner (a task, a sub-agent), is drawn alike: sections can be moved, so
 // no card may look like a special first one. The current task is marked by its "now" tag, not its border.
 const CARD = { flexDirection: 'column', borderStyle: 'single', borderColor: 'inactive', borderDimColor: true, paddingX: 1 } as const
@@ -278,6 +281,14 @@ export const register: Register = on => {
     const msg = e.element === CHIPS ? e.data : el.startsWith(CARD_TICKS) && typeof pick === 'string' ? { extra: { card: el.slice(CARD_TICKS.length), key: pick } } : typeof pick === 'string' && pick.startsWith('theme:') ? { theme: pick === 'theme:app' ? null : pick.slice(6) } : null
     await saveLayout($, msg)
     return {}
+  })
+
+  // A Button press whose handle the host no longer holds ("ui_press not handled") runs its closure from here instead.
+  on('ui.press', async ($, e, next) => {
+    const act = buttonActions.get(String(e.element))
+    if (!act) return next(e)
+    act(e as never)
+    return { element: e.element }
   })
 
   on('session.end', async ($, e, next) => {
@@ -565,7 +576,7 @@ export const register: Register = on => {
     const { Box, Text, Button } = ui
     // The terminal draws bars as characters; the other surfaces have a proportional font, so an SVG.
     const Svg = e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : undefined
-    const [list0, callList, note, open, toggles, act, sc, v0, cards, g0, rc, events, tn, lay0] = await Promise.all([
+    let [list0, callList, note, open, toggles, act, sc, v0, cards, g0, rc, events, tn, lay0] = await Promise.all([
       read($, tasks),
       read($, calls),
       read($, copied),
@@ -586,6 +597,21 @@ export const register: Register = on => {
     const tg = targetsOf(lay)
     const now = await $.clock.now()
     drawnAt = now
+    // Sample data: each card with nothing of its own shows labelled sample values; real data wins where present.
+    const isSample = lay.sample === true
+    if (isSample) {
+      const sd = sampleData(now)
+      if (!list0.some(t => taskTotal(t).calls > 0)) list0 = sd.tasks
+      if (callList.length === 0) callList = sd.calls
+      if (sc.at === 0 && Object.keys(sc.byModel).length === 0) sc = sd.scan
+      if (cards.length === 0) cards = sd.agents
+      if ((g0?.recent.length ?? 0) === 0) g0 = sd.gate
+      if (!rc) rc = sd.receipt
+      if (events.length === 0) events = sd.events
+      v0 = { ...DEFAULT_VITALS, ...v0, model: v0?.model || 'Sample model', ctxTokens: v0?.ctxTokens ?? 62_000, ctxWindow: v0?.ctxWindow || 200_000, ttftMs: v0?.ttftMs ?? 1_200, limits: v0?.limits?.length ? v0.limits : sd.limits }
+    }
+    // The press closures of this drawing by key: a press can reach the host after the drawing that held its own handle is gone.
+    buttonActions.clear()
     // A session whose start was missed still has a current task to show.
     const list = list0.length > 0 ? list0 : [newTask('Unlabelled', now)]
     // Values stored by an older version may lack fields added since.
@@ -715,7 +741,8 @@ export const register: Register = on => {
 
     const isOpen = (id: string) => open.includes(id)
     const flip = (id: string) => update($, sections, l => (l.includes(id) ? l.filter(x => x !== id) : [...l, id]))
-    type R = { text: string; color?: string; dim?: boolean; bold?: boolean; size?: string }
+    // w: drawn in the monospaced face, so ☑ and ☐ (different widths in the app's own font) take the same room.
+    type R = { text: string; color?: string; dim?: boolean; bold?: boolean; size?: string; w?: number }
     // A clickable title. With no theme, the surface's own Button. Under a theme on a surface with Clients (not desktop),
     // its own one-line surface in the theme's colours, since a desktop Button keeps the app's ink.
     // The desktop tears the whole pane down when a Client misses its 2000ms render answer, so desktop draws without them.
@@ -728,13 +755,20 @@ export const register: Register = on => {
         const ink = (r: R) => (r.color ? theme.keys[r.color] ?? r.color : r.dim ? theme.muted : theme.fg)
         return <Client key={`${PRESS}${key}`} module="./press.tsx" props={{ bg: theme.card, runs: runs.map(r => ({ text: r.text, color: ink(r), ...(r.bold ? { bold: true } : {}) })) }} height={1} />
       }
+      buttonActions.set(key, onPress)
       return (
         <Button key={key} plain onPress={onPress}>
-          {runs.map((r, i) => <Text key={`r${i}`} color={r.color} dimColor={r.dim} bold={r.bold} size={r.size as never}>{r.text}</Text>)}
+          {runs.map((r, i) => <Text key={`r${i}`} color={r.color} dimColor={r.dim} bold={r.bold} size={r.size as never} mono={r.w ? true : undefined}>{r.text}</Text>)}
         </Button>
       )
     }
 
+    // Records a Button's closure under its key for the fallback above, and hands it back for onPress.
+    type PressFn = (p: { surface: Parameters<typeof $.ui.copy>[0]['surface'] }) => void
+    const keep = (key: string, f: PressFn): PressFn => {
+      buttonActions.set(key, f)
+      return f
+    }
     const setLayout = (msg: unknown) => void saveLayout($, msg).catch(() => undefined)
     const palette = theme ? { palette: { bg: theme.card, fg: theme.fg, muted: theme.muted, accent: theme.keys.claude ?? theme.fg } } : {}
     // The cog that opens a card's own menu: full ink, accent while open.
@@ -746,10 +780,10 @@ export const register: Register = on => {
       return Client ? (
         <Client key={`${CARD_TICKS}${card}`} module="./chips.tsx" props={{ isFixed: true, items: defs.map(d => ({ id: d.key, title: d.label, isShown: ex[d.key] ?? d.isOn })), ...palette }} height={defs.length} />
       ) : (
-        <Box key={`ticks-${card}`} flexDirection="column">
+        <Box key={`ticks-${card}`} flexDirection="column" paddingLeft={1}>
           {defs.map(d => {
             const isOn = ex[d.key] ?? d.isOn
-            return pressable(`x-${card}-${d.key}`, [{ text: isOn ? '☑' : '☐', color: isOn ? 'claude' : undefined, dim: !isOn }, { text: `  ${d.label}`, dim: !isOn }], () => setLayout({ extra: { card, key: d.key } }))
+            return pressable(`x-${card}-${d.key}`, [{ text: isOn ? '☑' : '☐', color: isOn ? 'claude' : undefined, dim: !isOn, w: 3 }, { text: `  ${d.label}`, dim: !isOn }], () => setLayout({ extra: { card, key: d.key } }))
           })}
         </Box>
       )
@@ -784,10 +818,10 @@ export const register: Register = on => {
           </Box>
           {m && (
             <Box key="menu" flexDirection="column" gap={1}>
-              {rule('sep')}
               {(EXTRAS[id] ?? []).length > 0 && heading('mh', 'SHOW IN THIS CARD')}
               {(EXTRAS[id] ?? []).length > 0 && extraTicks(id)}
               {more?.() as never}
+              {rule('sep')}
             </Box>
           )}
           {o && (
@@ -880,11 +914,11 @@ export const register: Register = on => {
       <Box key="chips" flexDirection="column">
         {chipItems.map((it, i) => (
           <Box key={it.id} flexDirection="row" gap={1}>
-            <Button key={`chip-${it.id}`} plain onPress={() => setLayout({ toggle: it.id })}>
+            <Button key={`chip-${it.id}`} plain onPress={keep('chip-' + it.id, () => setLayout({ toggle: it.id }))}>
               <Text dimColor={!it.isShown}>{`${it.isShown ? '☑' : '☐'} ${it.title}`}</Text>
             </Button>
             {i > 0 && (
-              <Button key={`up-${it.id}`} plain onPress={() => setLayout({ move: { id: it.id, to: i - 1 } })}>
+              <Button key={`up-${it.id}`} plain onPress={keep('up-' + it.id, () => setLayout({ move: { id: it.id, to: i - 1 } }))}>
                 <Text dimColor>↑</Text>
               </Button>
             )}
@@ -952,7 +986,7 @@ export const register: Register = on => {
           </Box>
           <Text dimColor tabular>
             {v.isRunning ? 'working' : 'idle'}
-            {mainEx.ttft && v.ttftMs !== null ? ` · first token ${dur(v.ttftMs)}` : ''}
+            {mainEx.ttft ? ` · first token ${v.ttftMs !== null ? dur(v.ttftMs) : '—'}` : ''}
           </Text>
         </Box>
         <Box key="ctx" flexDirection="column">
@@ -973,20 +1007,19 @@ export const register: Register = on => {
           // Cost and requests from the same snapshot, so the quotient is of one moment.
           stat('cpr', isUpdating ? 'COST / REQUEST · UPDATING' : 'COST / REQUEST', perReq(snapCost, total.calls), isUpdating && hasScan ? { sub: `as of ${hhmm(sc.at)}` } : {}),
         ])}
-        {v.limits.length > 0 && (
-          <Box key="limits" flexDirection="column">
-            {v.limits.slice(0, 3).map(l =>
-              meterRow(
-                l.kind,
-                l.kind === 'five_hour' ? '5-hour limit' : l.kind === 'seven_day' ? '7-day limit' : l.kind.replace(/_/g, ' '),
-                (l.est ?? l.pct) / 100,
-                l.pct >= tg.limBad ? 'error' : l.pct >= tg.limWarn ? 'warning' : 'suggestion',
-                n(l.est != null ? `${l.est.toFixed(2)}%` : `${Math.round(l.pct)}%`, { bold: true }),
-                l.resetsAt ? `↻ ${untilReset(Math.max(0, l.resetsAt - now))}` : '',
-              ),
-            )}
-          </Box>
-        )}
+        {/* The 5-hour and 7-day rows always show; with no reading yet (the host gave none) they read — until one lands. */}
+        <Box key="limits" flexDirection="column">
+          {(v.limits.length > 0 ? v.limits.slice(0, 3) : [{ kind: 'five_hour', pct: 0, resetsAt: null, none: true }, { kind: 'seven_day', pct: 0, resetsAt: null, none: true }] as (Limit & { none?: true })[]).map((l: Limit & { none?: true }) =>
+            meterRow(
+              l.kind,
+              l.kind === 'five_hour' ? '5-hour limit' : l.kind === 'seven_day' ? '7-day limit' : l.kind.replace(/_/g, ' '),
+              l.none ? 0 : (l.est ?? l.pct) / 100,
+              l.pct >= tg.limBad ? 'error' : l.pct >= tg.limWarn ? 'warning' : 'suggestion',
+              n(l.none ? '—' : l.est != null ? `${l.est.toFixed(2)}%` : `${Math.round(l.pct)}%`, { bold: true }),
+              l.resetsAt ? `↻ ${untilReset(Math.max(0, l.resetsAt - now))}` : '',
+            ),
+          )}
+        </Box>
         <Box key="foot" flexDirection="row" gap={1} alignItems="flex-end" justifyContent="flex-end">
           {cacheWarning !== null && (
             <Box flexGrow={1} flexShrink={1} minWidth={0}>
@@ -1009,13 +1042,18 @@ export const register: Register = on => {
             <Box key="cols" flexDirection="row" flexWrap="wrap" columnGap={4} rowGap={1}>
               {group('cards', 'CARDS', 'Tick to show, drag to move. Each card has its own ⚙ for its extras.', chips)}
               {group('main-extras', 'MAIN CARD', 'Extras shown in this card.', extraTicks('vitals'))}
+              {group('sample', 'SAMPLE DATA', 'Fill empty cards with labelled sample values.', (
+                <Box key="sample-list" flexDirection="column" paddingLeft={1}>
+                  {pressable('sample-data', [{ text: isSample ? '☑' : '☐', color: isSample ? 'claude' : undefined, dim: !isSample, w: 3 }, { text: '  Sample data', dim: !isSample }], () => setLayout({ sample: true }))}
+                </Box>
+              ))}
               {group('themes', 'THEME', 'Colours for the whole pane.', Client ? (
                 <Client key={`${TICKS}-theme`} module="./chips.tsx" props={{ isFixed: true, items: themeChoices.map(o => ({ id: `theme:${o.id}`, title: o.name, isShown: (lay.theme ?? 'app') === o.id })), ...palette }} height={themeChoices.length} />
               ) : (
-                <Box key="theme-list" flexDirection="column">
+                <Box key="theme-list" flexDirection="column" paddingLeft={1}>
                   {themeChoices.map(o => {
                     const isOn = (lay.theme ?? 'app') === o.id
-                    return pressable(`theme-${o.id}`, [{ text: isOn ? '☑' : '☐', dim: !isOn }, { text: ` ${o.name}`, bold: isOn, dim: !isOn }], () => setLayout({ theme: o.id === 'app' ? null : o.id }))
+                    return pressable(`theme-${o.id}`, [{ text: isOn ? '☑' : '☐', dim: !isOn, w: 3 }, { text: ` ${o.name}`, bold: isOn, dim: !isOn }], () => setLayout({ theme: o.id === 'app' ? null : o.id }))
                   })}
                 </Box>
               ))}
@@ -1133,8 +1171,8 @@ export const register: Register = on => {
       </Text>,
       sessEx.csv && (
         <Box key="actions" flexDirection="row" flexWrap="wrap" gap={1} alignItems="center">
-          <Button key="copy-summary" label="Copy tasks (CSV)" onPress={p => void copy('the task summary', summaryCsv(list, factor), p.surface)} />
-          <Button key="copy-calls" label={`Copy ${callList.length} requests (CSV)`} onPress={p => void copy('the request log', callsCsv(callList, factor), p.surface)} />
+          <Button key="copy-summary" label="Copy tasks (CSV)" onPress={keep('copy-summary', p => void copy('the task summary', summaryCsv(list, factor), p.surface))} />
+          <Button key="copy-calls" label={`Copy ${callList.length} requests (CSV)`} onPress={keep('copy-calls', p => void copy('the request log', callsCsv(callList, factor), p.surface))} />
           {note !== '' && (
             <Text dimColor size="footnote">
               {note}
@@ -1497,6 +1535,7 @@ export const register: Register = on => {
     // The pane keeps the app's own background around the cards, so no second colour frames them.
     const tree = (
       <Box flexDirection="column" gap={1} {...(theme ? { flexGrow: 1 } : {})}>
+        {isSample && <Text key="sample-note" color="warning" size="footnote" wrap="wrap">SAMPLE DATA is on: empty cards show made-up values marked "sample". Real data replaces them.</Text>}
         {vitalsCard}
         {lay.order.filter(id => !lay.hidden.includes(id)).map(id => byId[id]?.())}
         <Text key="foot" dimColor size="footnote">

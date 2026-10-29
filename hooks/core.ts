@@ -1,7 +1,7 @@
 // Pure helpers: numbers, prices, formatting. No engine calls here.
 import type { ModelUsage, SessionContextBreakdown } from 'claude-code'
 
-import type { Bucket, Gate, Layout, Row, Scan, Targets, Task, Usage } from '../types'
+import type { AgentCard, Bucket, Call, Gate, Layout, Limit, LogLine, Receipt, Row, Scan, Targets, Task, Usage } from '../types'
 
 export const empty = (): Usage => ({ input: 0, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0, output: 0, calls: 0, usd: 0 })
 export const newTask = (label: string, now: number): Task => ({
@@ -392,12 +392,18 @@ export const cleanLayout = (raw: unknown): Layout => {
     ...(typeof r.theme === 'string' && r.theme in THEMES ? { theme: r.theme } : {}),
     ...changedTargets(savedTargets(r.targets)),
     ...changedCards(r.cards),
+    ...((r as { sample?: unknown }).sample === true ? { sample: true as const } : {}),
   }
 }
 
 /** A message from the section chips: tick one, or move one to a new place. Anything else leaves it as it was. */
 export const applyLayoutMessage = (l: Layout, data: unknown): Layout => {
-  const d = (data ?? {}) as { toggle?: unknown; move?: { id?: unknown; to?: unknown }; extra?: { card?: unknown; key?: unknown }; theme?: unknown; target?: unknown }
+  const d = (data ?? {}) as { sample?: unknown; toggle?: unknown; move?: { id?: unknown; to?: unknown }; extra?: { card?: unknown; key?: unknown }; theme?: unknown; target?: unknown }
+  // The sample-data tick flipped ({ sample: true }); stored only while on.
+  if (d.sample === true) {
+    const { sample: was, ...rest } = l
+    return was ? rest : { ...rest, sample: true }
+  }
   // One extra of one card flipped ({ extra: { card, key } }).
   const ex = d.extra
   if (typeof ex?.card === 'string' && typeof ex.key === 'string' && (EXTRAS[ex.card] ?? []).some(x => x.key === ex.key)) {
@@ -506,4 +512,28 @@ export const paint = <T>(node: T, t: Theme): T => {
   if (n.children !== undefined) out.children = paint(n.children, t)
   if (props.children !== undefined) props.children = paint(props.children, t)
   return out as T
+}
+
+// ---- sample data: labelled made-up values that fill the cards that have none, so each card's layout can be judged.
+const sampleUsage = (calls: number, input: number): Usage => ({ input, cacheWrite: Math.round(input / 4), cacheRead: input * 8, output: Math.round(input / 10), calls, usd: (input * 5 + input * 2) / 1e6 })
+export const sampleData = (now: number) => {
+  const m = 'claude-opus-5-5'
+  const row = (id: string, who: string, type: string, input: number): Row => ({ id, who, type, models: [m], usage: sampleUsage(3, input) })
+  const task = (label: string, ago: number, input: number): Task => ({
+    label,
+    startedAt: now - ago,
+    main: row('main', 'main thread', 'main', input),
+    agents: [row('a1', 'Sample sub-agent', 'Explore', input / 2)],
+  })
+  const total = sampleUsage(12, 400_000)
+  return {
+    tasks: [task('Sample task A', 3_600_000, 200_000), task('Sample task B', 600_000, 120_000)],
+    calls: [0, 1, 2].map(i => ({ at: now - (3 - i) * 60_000, task: 'Sample task B', who: i === 2 ? 'Sample sub-agent' : 'main thread', model: m, effort: 'high', input: 1200, cacheWrite: 300, cacheRead: 40_000, output: 500, usd: 0.05 })) as Call[],
+    scan: { at: now, byModel: { [m]: { main: total, agents: sampleUsage(4, 150_000) } }, costUsd: 4.2, cache: { first: 21_000, rebuilds: [{ at: now - 1_800_000, tokens: 60_000, why: 'idle' as const }], rebuildCount: 1, rebuildTokens: 60_000, memoryChars: 6_500, tools: [{ name: 'Sample Read', chars: 8_000, at: now - 900_000 }] } } as Scan,
+    limits: [{ kind: 'five_hour', pct: 42, resetsAt: now + 7_200_000, est: 42.37 }, { kind: 'seven_day', pct: 18, resetsAt: now + 3 * 86_400_000, est: 18.12 }] as Limit[],
+    agents: [{ id: 'sa1', type: 'Explore', model: m, description: 'Sample sub-agent (running)', status: 'running' as const, spawnedAt: now - 120_000, endedAt: null, ctx: 30_000, out: 1_500, steps: 4, lastTool: 'Read' }, { id: 'sa2', type: 'Plan', model: m, description: 'Sample sub-agent (done)', status: 'done' as const, spawnedAt: now - 600_000, endedAt: now - 300_000, ctx: 50_000, out: 3_000, steps: 9, lastTool: 'Grep' }] as AgentCard[],
+    gate: { totals: { ...emptyGate().totals, file: { allowed: 5, asked: 1, denied: 0 }, shell: { allowed: 3, asked: 2, denied: 1 } }, recent: [{ at: now - 60_000, tool: 'Sample Bash', bucket: 'shell' as const, verdict: 'asked' as const, detail: 'sample check' }] } as Gate,
+    receipt: { durationMs: 95_000, agents: 1, edits: 3, errors: 0, tools: 12, costDelta: 0.42, reason: 'sample', requests: 3, cacheHit: 0.9 } as Receipt,
+    events: [{ at: now - 60_000, who: 'sample', text: 'Sample info line', kind: 'info' as const }, { at: now - 30_000, who: 'sample', text: 'Sample error line', kind: 'error' as const }, { at: now - 10_000, who: 'sample', text: 'Sample turn done', kind: 'done' as const }] as LogLine[],
+  }
 }

@@ -85,8 +85,8 @@ export type Receipt = { durationMs: number; agents: number; edits: number; error
 /** The pane's sections in order, and those ticked off; Vitals is always shown and not listed. */
 // theme: a THEMES id, absent for the app's own colours; targets: the limits the person has set in the Cache card's menu,
 // only those that differ from the defaults; cards: each card's extras ticked in its own ⚙ menu (card id -> extra -> on),
-// only those that differ from the defaults in core.ts EXTRAS.
-export type Layout = { order: string[]; hidden: string[]; theme?: string; targets?: Partial<Targets>; cards?: Record<string, Record<string, boolean>> }
+// only those that differ from the defaults in core.ts EXTRAS; sample: empty cards show labelled sample values (absent = off).
+export type Layout = { order: string[]; hidden: string[]; theme?: string; targets?: Partial<Targets>; cards?: Record<string, Record<string, boolean>>; sample?: true }
 /** The limits the bars are coloured by: each set in settings, defaults in core.ts TARGETS. */
 export type Targets = { memGood: number; memFine: number; memBar: number; turnMax: number; ctxWarn: number; ctxBad: number; limWarn: number; limBad: number }
 export type LogLine = { at: number; who: string; text: string; kind: 'info' | 'error' | 'done' }
