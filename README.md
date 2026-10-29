@@ -10,6 +10,23 @@ It builds on the token-use mod and takes ideas from [Flightdeck](https://github.
 </p>
 <p align="center"><sub>The Original theme (left) and Frostwerk (right).</sub></p>
 
+## Two ways to view it: the pane and the live page
+
+Session Watcher shows the same cards in two places. Use either, or both.
+
+| | Pane | Live page |
+| --- | --- | --- |
+| What it is | A pane beside the chat, drawn by the mod | A private page on your claude.ai account, published by the mod |
+| Where it shows | Local sessions: the terminal and the desktop app's Code tab | Anywhere you are signed in to claude.ai, including cloud sessions in the desktop app, where the pane cannot be drawn |
+| Open it | `/session-watcher` | Link in a toast and the Activity card; pin it to the claude.ai sidebar |
+| Own window | No, it sits beside the chat | Yes, open it in its own browser tab or window |
+| Updates | As each event happens | After each request, at most every 10 seconds (`/session-watcher live <seconds>`) |
+| Page menu | None | claude.ai's own menu: copy as Markdown, export, duplicate, share and more |
+| Viewer settings | Kept by the mod | Open cards, extras, theme and order kept in your browser |
+| Turn off | `/session-watcher close` | `/session-watcher live off` |
+
+Both read the same state with the same formulas, so their numbers match.
+
 ## Design
 
 The layout follows a short set of written rules: [docs/DESIGN.md](docs/DESIGN.md). Tests check every rule on every card.

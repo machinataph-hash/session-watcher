@@ -1,7 +1,7 @@
 {
   "name": "session-watcher",
   "version": "0.4.0",
-  "description": "One pane for the whole session: context and rate limits, Claude Code's real cost, token use per session, per task and per request, sub-agents, permission checks and an activity log, also published as a live private page on claude.ai. Watch-only.",
+  "description": "One pane for the whole session: context and rate limits, Claude Code's real cost, token use per session, per task and per request, sub-agents, permission checks and an activity log, also published as a live private page on claude.ai that opens in its own browser tab. Use the pane, the page or both. Watch-only.",
   "author": { "name": "machinataph-hash", "url": "https://github.com/machinataph-hash" },
   "homepage": "https://github.com/machinataph-hash/session-watcher",
   "repository": "https://github.com/machinataph-hash/session-watcher",
