@@ -940,7 +940,7 @@ export const register: Register = on => {
                 )}
               </Box>
               <Box key="targets" flexDirection="column" flexShrink={0} gap={1}>
-                {heading('tg', 'TARGETS')}
+                {heading('tg', 'CACHE TARGETS')}
                 <Box key="rows" flexDirection="column">
                   {TARGETS.map(d => (
                     <Box key={d.id} flexDirection="row" gap={1} alignItems="center">
