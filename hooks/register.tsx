@@ -741,7 +741,7 @@ export const register: Register = on => {
 
     const isOpen = (id: string) => open.includes(id)
     const flip = (id: string) => update($, sections, l => (l.includes(id) ? l.filter(x => x !== id) : [...l, id]))
-    // w: drawn in the monospaced face, so [x] and [ ] (different widths in the app's own font) take the same room.
+    // w: drawn in the monospaced face, so ■ and □ (one glyph family, drawn in the monospaced face) take the same room.
     type R = { text: string; color?: string; dim?: boolean; bold?: boolean; size?: string; w?: number }
     // A clickable title. With no theme, the surface's own Button. Under a theme on a surface with Clients (not desktop),
     // its own one-line surface in the theme's colours, since a desktop Button keeps the app's ink.
@@ -783,7 +783,7 @@ export const register: Register = on => {
         <Box key={`ticks-${card}`} flexDirection="column" paddingLeft={1}>
           {defs.map(d => {
             const isOn = ex[d.key] ?? d.isOn
-            return pressable(`x-${card}-${d.key}`, [{ text: isOn ? '[x]' : '[ ]', color: isOn ? 'claude' : undefined, dim: !isOn, w: 3 }, { text: `  ${d.label}`, dim: !isOn }], () => setLayout({ extra: { card, key: d.key } }))
+            return pressable(`x-${card}-${d.key}`, [{ text: isOn ? '■' : '□', color: isOn ? 'claude' : undefined, dim: !isOn, w: 3 }, { text: `  ${d.label}`, dim: !isOn }], () => setLayout({ extra: { card, key: d.key } }))
           })}
         </Box>
       )
@@ -926,14 +926,16 @@ export const register: Register = on => {
       <Box key="chips" flexDirection="column">
         {chipItems.map((it, i) => (
           <Box key={it.id} flexDirection="row" gap={1}>
-            <Button key={`chip-${it.id}`} plain onPress={keep('chip-' + it.id, () => setLayout({ toggle: it.id }))}>
-              <Text dimColor={!it.isShown}>{`${it.isShown ? '[x]' : '[ ]'} ${it.title}`}</Text>
-            </Button>
-            {i > 0 && (
+            {i > 0 ? (
               <Button key={`up-${it.id}`} plain onPress={keep('up-' + it.id, () => setLayout({ move: { id: it.id, to: i - 1 } }))}>
                 <Text dimColor>↑</Text>
               </Button>
+            ) : (
+              <Text key={`up-${it.id}`} dimColor> </Text>
             )}
+            <Button key={`chip-${it.id}`} plain onPress={keep('chip-' + it.id, () => setLayout({ toggle: it.id }))}>
+              <Text dimColor={!it.isShown}>{`${it.isShown ? '■' : '□'} ${it.title}`}</Text>
+            </Button>
           </Box>
         ))}
       </Box>
@@ -1056,7 +1058,7 @@ export const register: Register = on => {
               {group('main-extras', 'MAIN CARD', 'Extras shown in this card.', extraTicks('vitals'))}
               {group('sample', 'SAMPLE DATA', 'Fill empty cards with labelled sample values.', (
                 <Box key="sample-list" flexDirection="column" paddingLeft={1}>
-                  {pressable('sample-data', [{ text: isSample ? '[x]' : '[ ]', color: isSample ? 'claude' : undefined, dim: !isSample, w: 3 }, { text: '  Sample data', dim: !isSample }], () => setLayout({ sample: true }))}
+                  {pressable('sample-data', [{ text: isSample ? '■' : '□', color: isSample ? 'claude' : undefined, dim: !isSample, w: 3 }, { text: '  Sample data', dim: !isSample }], () => setLayout({ sample: true }))}
                 </Box>
               ))}
               {group('themes', 'THEME', 'Colours for the whole pane.', Client ? (
@@ -1065,7 +1067,7 @@ export const register: Register = on => {
                 <Box key="theme-list" flexDirection="column" paddingLeft={1}>
                   {themeChoices.map(o => {
                     const isOn = (lay.theme ?? 'app') === o.id
-                    return pressable(`theme-${o.id}`, [{ text: isOn ? '[x]' : '[ ]', dim: !isOn, w: 3 }, { text: ` ${o.name}`, bold: isOn, dim: !isOn }], () => setLayout({ theme: o.id === 'app' ? null : o.id }))
+                    return pressable(`theme-${o.id}`, [{ text: isOn ? '■' : '□', dim: !isOn, w: 3 }, { text: ` ${o.name}`, bold: isOn, dim: !isOn }], () => setLayout({ theme: o.id === 'app' ? null : o.id }))
                   })}
                 </Box>
               ))}
@@ -1132,11 +1134,21 @@ export const register: Register = on => {
       .filter(r => r.u.calls > 0)
       .sort((a, b) => b.u.usd - a.u.usd)
     const sessEx = extrasOf(lay, 'session')
+    // The live cost has moved past the scan's.
+    const isLagging = v.costUsd !== null && hasScan && Math.abs(v.costUsd - snapCost) > 0.005
+    const costNote = () => (
+      <Text key="cost-note" dimColor size="footnote" wrap="wrap">
+        {`Main card shows the live cost. This card shows the cost from the last log scan (as of ${hasScan ? hhmm(sc.at) : '—'}), which splits main thread and sub-agents. The gap is spend since that scan; it closes on the next scan.`}
+      </Text>
+    )
     const sessionBody = () => [
       // The total every row below adds up to: the snapshot's cost, marked while the live cost has moved past it.
       <Box key="tot" flexDirection="row" justifyContent="space-between">
         {heading('l', `TOTAL AT ${hasScan ? hhmm(sc.at) : '—'}${isUpdating ? ' · UPDATING' : ''}`)}
-        {n(usd(snapCost), { bold: true, color: 'claude' })}
+        <Box key="tv" flexDirection="row" gap={1} alignItems="center">
+          {isLagging && hasScan && <Text dimColor size="footnote">{`as of ${hhmm(sc.at)}`}</Text>}
+          {n(usd(snapCost), { bold: true, color: 'claude' })}
+        </Box>
       </Box>,
       hasScan && stats('s', [
         stat('m', 'MAIN THREAD', usd(mainCost), { sub: `${perReq(mainCost, mainU.calls)} / request` }),
@@ -1530,7 +1542,7 @@ export const register: Register = on => {
     }
     const errorsNow = events.filter(l => l.kind === 'error').length
     const byId: Record<string, () => ReturnType<typeof section>> = {
-      session: () => section('session', 'Session Totals', hasScan ? `main ${usd(mainCost)} · agents ${usd(agentCost)}${isUpdating ? ' · updating' : ''}` : '—', sessionBody),
+      session: () => section('session', 'Session Totals', hasScan ? `main ${usd(mainCost)} · agents ${usd(agentCost)}${isUpdating ? ' · updating' : ''}` : '—', sessionBody, costNote),
       tasks: () => section('tasks', 'Tasks', `${shownTasks.length} · now: ${last?.label ?? '—'}`, tasksBody),
       requests: () => section('requests', 'Recent Requests', `${callList.length} seen`, requestsBody),
       agents: () => section('agents', 'Sub-Agents', agentCount === 0 ? 'none' : `${running} running`, agentsBody),

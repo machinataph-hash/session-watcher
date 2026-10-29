@@ -310,9 +310,9 @@ test('desktop: a theme pick chooses a theme, and a Main extra flips', async ($, 
   await start($, on)
   const ui = await mount($, 'desktop')
   await ui.press({ key: 'settings' })
-  // No Client on desktop: each choice is a Button, ticked when its box reads [x].
+  // No Client on desktop: each choice is a Button, ticked when its box reads ■.
   expect(await ui.findAll({ type: 'Client' })).toHaveLength(0)
-  const ticked = async (key: string) => JSON.stringify(await ui.find({ key })).includes('[x]')
+  const ticked = async (key: string) => JSON.stringify(await ui.find({ key })).includes('■')
   expect(await ticked('theme-app')).toBe(true)
   expect(await ticked('theme-reader')).toBe(false)
   await ui.press({ key: 'theme-reader' })
@@ -621,7 +621,7 @@ test('desktop: Sample data tick fills empty cards and is saved', async ($, on) =
   await ui.press({ key: 'sample-data' })
   expect(await ui.find({ type: 'Text', text: /SAMPLE DATA is on/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^5-hour limit$/ })).toBeDefined()
-  expect(JSON.stringify(await ui.find({ key: 'sample-data' }))).toContain('[x]')
+  expect(JSON.stringify(await ui.find({ key: 'sample-data' }))).toContain('■')
   expect(applyLayoutMessage(defaultLayout(), { sample: true }).sample).toBe(true)
   expect(cleanLayout({ sample: true }).sample).toBe(true)
   expect(cleanLayout({}).sample).toBeUndefined()
@@ -638,7 +638,7 @@ test('desktop: every card menu draws its tick Buttons without error', async ($, 
     expect(await ui.find({ type: 'Text', text: /could not draw/ })).toBeUndefined()
     for (const d of EXTRAS[id]!) {
       const tick = await ui.find({ key: `x-${id}-${d.key}` })
-      if (tick) expect(JSON.stringify(tick)).toMatch(/\[x\]|\[ \]/)
+      if (tick) expect(JSON.stringify(tick)).toMatch(/■|□/)
     }
   }
 })
@@ -687,12 +687,26 @@ test(`desktop: tick labels are the same length checked or not, theme ${theme ?? 
   await start($, on)
   const ui = await mount($, 'desktop')
   await ui.press({ key: 'settings' })
-  const box = (s: string) => /\[[x ]\]/.exec(s)?.[0]
+  const box = (s: string) => /[■□]/.exec(s)?.[0]
   const a = JSON.stringify(await ui.find({ key: 'x-vitals-active' }))
   await ui.press({ key: 'x-vitals-active' })
   const b = JSON.stringify(await ui.find({ key: 'x-vitals-active' }))
-  expect(box(a)).toBe('[ ]')
-  expect(box(b)).toBe('[x]')
+  expect(box(a)).toBe('□')
+  expect(box(b)).toBe('■')
   expect(box(a)!.length).toBe(box(b)!.length)
   expect(a).not.toMatch(/[☑☐]/)
+})
+
+// Main settings: the move-up arrow sits left of each tick; Session Totals explains the cost gap with the real scan time.
+test('desktop: up arrow left of the tick; Session Totals cost note and as-of time', async ($, on) => {
+  mock.clock(on)
+  mock.store(on, { layout: { order: ['session', 'tasks'], hidden: [] } })
+  await start($, on)
+  const ui = await mount($, 'desktop')
+  await ui.press({ key: 'settings' })
+  const row = JSON.stringify(await ui.find({ key: 'tasks' }))
+  expect(row.indexOf('up-tasks')).toBeGreaterThan(-1)
+  expect(row.indexOf('up-tasks')).toBeLessThan(row.indexOf('chip-tasks'))
+  await ui.press({ key: 'cfg-session' })
+  expect(await ui.find({ type: 'Text', text: /Main card shows the live cost\. This card shows the cost from the last log scan \(as of .*\), which splits/ })).toBeDefined()
 })
