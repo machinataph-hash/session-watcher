@@ -63,7 +63,8 @@ export const sum = (a: Usage, b: Usage): Usage => ({
 
 // "Fresh" is what was paid full price: uncached input, cache writes and output.
 export const fresh = (u: Usage) => u.input + u.cacheWrite + u.output
-// Weighted: each kind by its price ratio to uncached input, so it compares cost, not volume.
+// Weighted: each kind by its price ratio to uncached input, so it compares cost, not volume. Shown as a token
+// figure and as shares (Session Totals, Tasks); never in the Main card, never divided into cost.
 export const weighted = (u: Usage) => u.input + writeCost(u) + u.cacheRead * 0.1 + u.output * 5
 
 export const rowUse = (r: Row, model: string, u: Usage): Row => ({
@@ -268,7 +269,7 @@ export const SECTIONS: { id: string; title: string }[] = [
   { id: 'requests', title: 'Recent Requests' },
   { id: 'agents', title: 'Sub-Agents' },
   { id: 'gate', title: 'Permissions' },
-  { id: 'cache', title: 'Cache Health' },
+  { id: 'cache', title: 'Cache' },
   { id: 'turn', title: 'Last Turn' },
   { id: 'log', title: 'Activity' },
 ]
@@ -335,23 +336,75 @@ const changedTargets = (saved: Partial<Targets>) => {
   return Object.keys(out).length > 0 ? { targets: out } : {}
 }
 
-/** Any stored value made a valid layout: known ids once each, in their saved order, new sections last. */
+// Each card's optional extras, ticked in its own ⚙ menu. 'vitals' is the Main card. Only ticks that differ from
+// the default are stored, so a later change of a default reaches everyone who left it.
+export const EXTRAS: Record<string, { key: string; label: string; isOn: boolean }[]> = {
+  vitals: [
+    { key: 'active', label: 'Active time and its share', isOn: false },
+    { key: 'ttft', label: 'First-token time', isOn: false },
+  ],
+  session: [
+    { key: 'tokens', label: 'Token counts and weight', isOn: true },
+    { key: 'csv', label: 'Copy as CSV buttons', isOn: true },
+  ],
+  tasks: [
+    { key: 'hint', label: 'How tasks work', isOn: true },
+    { key: 'kinds', label: 'Cost by kind in each task', isOn: true },
+  ],
+  requests: [{ key: 'tokens', label: 'Token columns', isOn: true }],
+  agents: [
+    { key: 'breakdown', label: 'Cost by type and model', isOn: false },
+    { key: 'finished', label: 'Finished sub-agents', isOn: true },
+  ],
+  gate: [{ key: 'recent', label: 'Latest checks', isOn: true }],
+  cache: [
+    { key: 'tools', label: 'Largest tool results', isOn: true },
+    { key: 'rebuilds', label: 'Rebuild list', isOn: true },
+  ],
+  turn: [{ key: 'requests', label: 'Requests this turn', isOn: true }],
+  log: [{ key: 'info', label: 'Info lines (off: errors and done only)', isOn: true }],
+}
+
+/** A card's extras in force: its stored ticks over the defaults. */
+export const extrasOf = (l: Layout, card: string): Record<string, boolean> =>
+  Object.fromEntries((EXTRAS[card] ?? []).map(x => [x.key, l.cards?.[card]?.[x.key] ?? x.isOn]))
+
+// Only known cards and keys, only booleans that differ from the default.
+const changedCards = (raw: unknown) => {
+  const r = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>
+  const out: Record<string, Record<string, boolean>> = {}
+  for (const [card, defs] of Object.entries(EXTRAS)) {
+    const c = (typeof r[card] === 'object' && r[card] !== null ? r[card] : {}) as Record<string, unknown>
+    for (const d of defs) if (typeof c[d.key] === 'boolean' && c[d.key] !== d.isOn) (out[card] ??= {})[d.key] = c[d.key] as boolean
+  }
+  return Object.keys(out).length > 0 ? { cards: out } : {}
+}
+
+/** Any stored value made a valid layout: known ids once each, in their saved order, new sections last.
+ * Fields from older versions (hideCacheBar: the bar has left the Main card) are dropped. */
 export const cleanLayout = (raw: unknown): Layout => {
-  const r = (raw ?? {}) as { order?: unknown; hidden?: unknown; hideCacheBar?: unknown; theme?: unknown; targets?: unknown }
+  const r = (raw ?? {}) as { order?: unknown; hidden?: unknown; theme?: unknown; targets?: unknown; cards?: unknown }
   const ids = (x: unknown) => (Array.isArray(x) ? x.filter((id): id is string => typeof id === 'string' && SECTION_IDS.includes(id)) : [])
   const order = [...new Set(ids(r.order))]
   return {
     order: [...order, ...SECTION_IDS.filter(id => !order.includes(id))],
     hidden: [...new Set(ids(r.hidden))],
-    ...(r.hideCacheBar === true ? { hideCacheBar: true } : {}),
     ...(typeof r.theme === 'string' && r.theme in THEMES ? { theme: r.theme } : {}),
     ...changedTargets(savedTargets(r.targets)),
+    ...changedCards(r.cards),
   }
 }
 
 /** A message from the section chips: tick one, or move one to a new place. Anything else leaves it as it was. */
 export const applyLayoutMessage = (l: Layout, data: unknown): Layout => {
-  const d = (data ?? {}) as { toggle?: unknown; move?: { id?: unknown; to?: unknown }; flag?: unknown; theme?: unknown; target?: unknown }
+  const d = (data ?? {}) as { toggle?: unknown; move?: { id?: unknown; to?: unknown }; extra?: { card?: unknown; key?: unknown }; theme?: unknown; target?: unknown }
+  // One extra of one card flipped ({ extra: { card, key } }).
+  const ex = d.extra
+  if (typeof ex?.card === 'string' && typeof ex.key === 'string' && (EXTRAS[ex.card] ?? []).some(x => x.key === ex.key)) {
+    const cur = extrasOf(l, ex.card)
+    const { cards: _, ...rest } = l
+    return { ...rest, ...changedCards({ ...l.cards, [ex.card]: { ...cur, [ex.key]: !cur[ex.key] } }) }
+  }
   // A limit one step up or down ({ target: { id, by: 1 | -1 } }), or all back to the defaults ({ target: 'reset' }).
   if (d.target === 'reset') {
     const { targets: _, ...rest } = l
@@ -363,10 +416,6 @@ export const applyLayoutMessage = (l: Layout, data: unknown): Layout => {
     if (!canStep(l, def.id, tg.by)) return l
     const { targets: _, ...rest } = l
     return { ...rest, ...changedTargets({ ...savedTargets(l.targets), [def.id]: targetsOf(l)[def.id] + tg.by * def.step }) }
-  }
-  if (d.flag === 'cacheBar') {
-    const { hideCacheBar, ...rest } = l
-    return hideCacheBar ? rest : { ...rest, hideCacheBar: true }
   }
   // A theme id picks it; null goes back to the app's own colours.
   if (d.theme === null || (typeof d.theme === 'string' && d.theme in THEMES)) {

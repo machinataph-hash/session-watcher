@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 import Chips from './chips'
-import { applyLayoutMessage, breakdownText, canStep, cleanLayout, defaultLayout, targetsOf, emptyLimitModel, estimateLimit, fromModel, paint, THEMES, stepLimitModel, usdOf, weighted } from './core'
+import { applyLayoutMessage, extrasOf, breakdownText, canStep, cleanLayout, defaultLayout, targetsOf, emptyLimitModel, estimateLimit, fromModel, paint, THEMES, stepLimitModel, usdOf, weighted } from './core'
 
 const pane = { title: '', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} } as const
 const usage = { model: 'claude-opus-5-5', input_tokens: 1000, output_tokens: 2000, cache_read_input_tokens: 100000, cache_creation_input_tokens: 4000 }
@@ -64,7 +64,7 @@ for (const surface of ['terminal', 'desktop'] as const)
         if (id !== 'session') await ui.press({ key: `sec-${id}` })
       }
       expect(await ui.find({ type: 'Text', text: /No calls yet/ })).toBeDefined()
-      expect(await ui.find({ type: 'Text', text: /No sub-agents/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /None running/ })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: /No finished turn yet/ })).toBeDefined()
     })
   }
@@ -106,8 +106,8 @@ test('cache writes are priced by cache length', async () => {
   expect(weighted({ input: 0, cacheWrite: 1000, cacheRead: 0, output: 0, calls: 1, usd: 0 })).toBe(1250)
 })
 
-// Cache Health shows the transcript's figures, and a limit passed shows in the always-shown Vitals card.
-test('cache health section and its Vitals line', async ($, on) => {
+// The Cache card shows the transcript's figures, and a limit passed shows as a warning in the Main card.
+test('cache section and its Main line', async ($, on) => {
   mock.clock(on)
   const cache = {
     first: 91525,
@@ -129,6 +129,7 @@ test('cache health section and its Vitals line', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: /^STARTING LOAD$/ })).toBeUndefined()
   await ui.press({ key: 'sec-cache' })
   expect(await ui.find({ type: 'Text', text: /^STARTING LOAD$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^CACHE HIT RATE$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^92k$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^18,057 \/ 10,000 chars/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^  Bad$/ })).toBeDefined()
@@ -164,7 +165,7 @@ test(`${surface}: the Vitals stats row folds away`, async ($, on) => {
   expect(await ui.find({ type: 'Text', text: /^RUNNING FOR$/ })).toBeDefined()
 })
 
-// Requests this turn are shown in Cache Health only; Vitals carries no turn-count warning.
+// Requests this turn are shown in Last Turn only; Vitals carries no turn-count warning.
 test('requests this turn past 15 no longer warn in Vitals', async ($, on) => {
   mock.clock(on, { now: 1_000_000 })
   on('turn.step', async function* () {
@@ -260,9 +261,9 @@ for (const surface of ['terminal', 'desktop'] as const)
     mock.store(on)
     await start($, on)
     const ui = await mount($, surface)
-    expect(await ui.find({ type: 'Text', text: /SECTIONS · TICK/ })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /^CARDS$/ })).toBeUndefined()
     await ui.press({ key: 'settings' })
-    expect(await ui.find({ type: 'Text', text: /SECTIONS · TICK/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^CARDS$/ })).toBeDefined()
     // Untick Tasks (row 1): its section goes, its chip stays.
     expect(await ui.find({ type: 'Text', text: /^Tasks$/ })).toBeDefined()
     await ui.pointer({ type: 'down', x: 0, y: 1, button: 'left', in: 'section-chips' })
@@ -285,11 +286,11 @@ for (const surface of ['terminal', 'desktop'] as const)
     // The sections themselves still open and close.
     await ui.press({ key: 'sec-log' })
     await ui.press({ key: 'settings' })
-    expect(await ui.find({ type: 'Text', text: /SECTIONS · TICK/ })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /^CARDS$/ })).toBeUndefined()
   })
 
-// The theme is a dropdown; the Cache Health bar flag is a Button. Both picks are saved.
-test('desktop: a theme tick picks a theme, and the Cache Health bar flag flips', async ($, on) => {
+// The theme and the Main card's extras are tick lists; both picks are saved.
+test('desktop: a theme tick picks a theme, and a Main extra flips', async ($, on) => {
   mock.clock(on)
   mock.store(on)
   await start($, on)
@@ -304,9 +305,11 @@ test('desktop: a theme tick picks a theme, and the Cache Health bar flag flips',
   expect(await on1('setting-ticks-theme')).toEqual(['theme:app'])
   await click('setting-ticks-theme', 2)
   expect(await on1('setting-ticks-theme')).toEqual(['theme:reader'])
-  expect(await on1('setting-ticks-flag')).toEqual(['cacheBar'])
-  await click('setting-ticks-flag', 0)
-  expect(await on1('setting-ticks-flag')).toEqual([])
+  expect(await on1('setting-ticks-card:vitals')).toEqual([])
+  expect(await ui.find({ type: 'Text', text: /^ACTIVE$/ })).toBeUndefined()
+  await click('setting-ticks-card:vitals', 0)
+  expect(await on1('setting-ticks-card:vitals')).toEqual(['active'])
+  expect(await ui.find({ type: 'Text', text: /^ACTIVE$/ })).toBeDefined()
   await click('setting-ticks-theme', 0)
   expect(await on1('setting-ticks-theme')).toEqual(['theme:app'])
 })
@@ -331,11 +334,18 @@ test('a layout saved by an earlier session is used at start', async ($, on) => {
   expect(keys).not.toContain('sec-tasks')
 })
 
-test('layout: cache-bar flag and theme are kept, unknown themes dropped', () => {
-  let l = applyLayoutMessage(cleanLayout(undefined), { flag: 'cacheBar' })
-  expect(l.hideCacheBar).toBe(true)
-  l = applyLayoutMessage(l, { flag: 'cacheBar' })
-  expect(l.hideCacheBar).toBeFalsy()
+test('layout: card extras flip and only changes are stored; old fields dropped; theme kept, unknown themes dropped', () => {
+  let l = cleanLayout({ order: [], hidden: [], hideCacheBar: true })
+  expect('hideCacheBar' in l).toBe(false)
+  expect(l.cards).toBeUndefined()
+  expect(extrasOf(l, 'vitals')).toEqual({ active: false, ttft: false })
+  l = applyLayoutMessage(l, { extra: { card: 'vitals', key: 'active' } })
+  expect(l.cards).toEqual({ vitals: { active: true } })
+  l = applyLayoutMessage(l, { extra: { card: 'vitals', key: 'active' } })
+  expect(l.cards).toBeUndefined()
+  // Unknown cards, keys and non-booleans are dropped.
+  expect(cleanLayout({ cards: { vitals: { nope: true, ttft: 'yes' }, zz: { a: true }, cache: { tools: false } } }).cards).toEqual({ cache: { tools: false } })
+  expect(applyLayoutMessage(l, { extra: { card: 'vitals', key: 'nope' } })).toBe(l)
   l = applyLayoutMessage(l, { theme: 'reader' })
   expect(cleanLayout(l).theme).toBe('reader')
   expect(cleanLayout({ ...l, theme: 'nope' }).theme).toBeUndefined()
@@ -464,13 +474,14 @@ test('targets: no upper end, a raised limit carries the one above, defaults are 
   expect(cleanLayout({ targets: { turnMax: 'x', nope: 3 } }).targets).toBeUndefined()
 })
 
-test('targets: the settings column steps a limit and the bars use it', async ($, on) => {
+test('targets: the Cache card menu steps a limit and the bars use it', async ($, on) => {
   mock.clock(on)
   await start($, on)
   const ui = await mount($, 'desktop')
   const shown = async () => (await ui.findAll({ type: 'Text' })).some(x => (x as any).props?.children === '16' || (x as any).children?.[0] === '16')
   expect(await ui.find({ key: 'tg-reset' })).toBeUndefined()
-  await ui.press({ key: 'settings' })
+  // The targets live in the Cache card's own menu now.
+  await ui.press({ key: 'cfg-cache' })
   expect(await shown()).toBe(false)
   await ui.press({ key: 'tg-turnMax-up' })
   expect(await shown()).toBe(true)
@@ -502,4 +513,36 @@ test('stats: terminal halves have no gap between them', async ($, on) => {
   expect(halves.length).toBeGreaterThan(0)
   const rows = boxes.filter(b => b.props?.flexWrap === 'wrap' && b.props?.columnGap === 0)
   expect(rows.length).toBeGreaterThan(0)
+})
+
+// The Main card's settings reflow: at a narrow terminal width each group takes the full row, nothing is wider than the pane.
+test('settings: groups stack at a narrow width and fit', async ($, on) => {
+  mock.clock(on)
+  await start($, on)
+  const ui = await mount($, 'terminal', 30)
+  await ui.press({ key: 'settings' })
+  for (const key of ['cards', 'main-extras', 'themes']) expect(((await ui.find({ key })) as any)?.props?.width).toBe('100%')
+  expect(await ui.find({ type: 'Text', text: /^THEME$/ })).toBeDefined()
+  const wide = await mount($, 'desktop', 120)
+  await wide.press({ key: 'settings' }).catch(() => undefined)
+  expect(((await wide.find({ key: 'themes' })) as any)?.props?.width).toBeUndefined()
+})
+
+// Session Totals: no weighted figure in Main; the snapshot total and main/agent rows from one read add up.
+test('session totals: parts from one snapshot add up to the shown total; Main has cost per request and no weighted', async ($, on) => {
+  mock.clock(on)
+  const u = (calls: number, inp: number) => ({ input: inp, cacheWrite: 0, cacheRead: 0, output: 0, calls, usd: 0 })
+  on('session.id', async () => ({ value: 'sid' }) as never)
+  on('session.usage', async () => ({ value: { startedAt: 0, context: { window: 1000 }, rateLimits: [], cost: { usd: 3 } } }) as never)
+  on('process.run', async () => ({ value: { exitCode: 0, stdout: JSON.stringify({ ms: 0, byModel: { 'claude-opus-5-5': { main: u(2, 2e6), agents: u(1, 1e6) } } }), stderr: '' } }) as never)
+  await start($, on)
+  for (let i = 0; i < 200; i++) await Promise.resolve()
+  const ui = await mount($, 'terminal', 80)
+  expect(await ui.find({ type: 'Text', text: /^COST \/ REQUEST$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^\$1\.00$/ })).toBeDefined()
+  // Weighted lives in Session Totals (with the token figures), never in Main.
+  expect(await ui.find({ type: 'Text', text: /^WEIGHTED$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^67%$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /main \$2\.00 · agents \$1\.00/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^\$3\.00$/ })).toBeDefined()
 })

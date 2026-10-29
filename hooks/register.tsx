@@ -15,6 +15,8 @@ import {
   empty,
   emptyGate,
   SECTIONS,
+  EXTRAS,
+  extrasOf,
   THEMES,
   paint,
   applyLayoutMessage,
@@ -91,8 +93,12 @@ const SETTINGS_OPEN = 'settings-open'
 const layout = atom({ plugin: 'session-watcher', key: 'layout' } as const, defaultLayout() as Layout)
 const LAYOUT = 'layout'
 const CHIPS = 'section-chips'
-// The theme list and the Cache Health bar flag: plain tick lists on the same kind of surface.
+// The theme list and each card's extras: plain tick lists on the same kind of surface.
 const TICKS = 'setting-ticks'
+// A card's ⚙ menu of extras posts from `${CARD_TICKS}<card id>`.
+const CARD_TICKS = `${TICKS}-card:`
+// Kept in the open-sections list: present means that card's ⚙ menu is open.
+const MENU = 'menu:'
 // Clickable titles drawn on their own surface under a theme; a press posts and runs the title's action.
 const PRESS = 'press:'
 // Rebuilt by each drawing, so it holds the titles shown now and nothing older.
@@ -269,7 +275,7 @@ export const register: Register = on => {
     const isTicks = el.startsWith(TICKS)
     if (e.element !== CHIPS && !isTicks) return next(e)
     const pick = (e.data as { pick?: unknown } | null)?.pick
-    const msg = e.element === CHIPS ? e.data : pick === 'cacheBar' ? { flag: 'cacheBar' } : typeof pick === 'string' && pick.startsWith('theme:') ? { theme: pick === 'theme:app' ? null : pick.slice(6) } : null
+    const msg = e.element === CHIPS ? e.data : el.startsWith(CARD_TICKS) && typeof pick === 'string' ? { extra: { card: el.slice(CARD_TICKS.length), key: pick } } : typeof pick === 'string' && pick.startsWith('theme:') ? { theme: pick === 'theme:app' ? null : pick.slice(6) } : null
     await saveLayout($, msg)
     return {}
   })
@@ -521,7 +527,10 @@ export const register: Register = on => {
     })
     const id = e.agentId
     if (!id) {
-      const [t, cards, cost] = await Promise.all([read($, turn), read($, agents), $.session.usage().then(u => u.cost?.usd ?? null).catch(() => null)])
+      const [t, cards, cost, cl] = await Promise.all([read($, turn), read($, agents), $.session.usage().then(u => u.cost?.usd ?? null).catch(() => null), read($, calls)])
+      // The turn's requests, main and sub-agents: how many, and how much of their input came from the cache.
+      const inTurn = cl.filter(c => c.at >= t.startedAt)
+      const seen = inTurn.reduce((a, c) => a + c.input + c.cacheWrite + c.cacheRead, 0)
       await update($, receipt, () => ({
         durationMs: e.durationMs,
         agents: cards.filter(c => c.spawnedAt >= t.startedAt).length,
@@ -530,6 +539,8 @@ export const register: Register = on => {
         tools: t.tools,
         costDelta: cost !== null && t.costAtStart !== null ? cost - t.costAtStart : null,
         reason: e.reason,
+        requests: inTurn.length,
+        cacheHit: seen > 0 ? inTurn.reduce((a, c) => a + c.cacheRead, 0) / seen : null,
       }))
       await update($, vitals, v => ({ ...v, isRunning: false }))
       await readUsage($)
@@ -724,11 +735,40 @@ export const register: Register = on => {
       )
     }
 
-    // One collapsible section: a header row that opens and closes it, a one-line summary while closed.
-    const section = (id: string, title: string, summary: string, body: () => unknown) => {
+    const setLayout = (msg: unknown) => void saveLayout($, msg).catch(() => undefined)
+    const palette = theme ? { palette: { bg: theme.card, fg: theme.fg, muted: theme.muted, accent: theme.keys.claude ?? theme.fg } } : {}
+    // The cog that opens a card's own menu: full ink, accent while open.
+    const cog = (key: string, isOn: boolean, onPress: () => void, size = 'title') => pressable(key, [{ text: '⚙', color: isOn ? 'claude' : undefined, bold: true, size }], onPress)
+    // A card's extras as ticks: a Client tick list where there is one, else one Button per extra.
+    const extraTicks = (card: string) => {
+      const ex = extrasOf(lay, card)
+      const defs = EXTRAS[card] ?? []
+      return Client ? (
+        <Client key={`${CARD_TICKS}${card}`} module="./chips.tsx" props={{ isFixed: true, items: defs.map(d => ({ id: d.key, title: d.label, isShown: ex[d.key] ?? d.isOn })), ...palette }} height={defs.length} />
+      ) : (
+        <Box key={`ticks-${card}`} flexDirection="column">
+          {defs.map(d => {
+            const isOn = ex[d.key] ?? d.isOn
+            return pressable(`x-${card}-${d.key}`, [{ text: isOn ? '☑' : '☐', color: isOn ? 'claude' : undefined, dim: !isOn }, { text: `  ${d.label}`, dim: !isOn }], () => setLayout({ extra: { card, key: d.key } }))
+          })}
+        </Box>
+      )
+    }
+    // A thin rule across the card, longer than any pane, held to one line by its box.
+    const rule = (key: string) => (
+      <Box key={key} height={1} overflow="hidden">
+        <Text dimColor wrap="wrap">{'─'.repeat(Math.max(inner, 600))}</Text>
+      </Box>
+    )
+
+    // One collapsible section: a header row that opens and closes it, a one-line summary while closed,
+    // and a ⚙ for the card's own menu (its extras, and `more` below them).
+    const section = (id: string, title: string, summary: string, body: () => unknown, more?: () => unknown) => {
       const o = isOpen(id)
+      const hasMenu = (EXTRAS[id] ?? []).length > 0 || more !== undefined
+      const m = hasMenu && isOpen(`${MENU}${id}`)
       return (
-        <Box key={id} {...CARD} gap={o ? 1 : 0}>
+        <Box key={id} {...CARD} gap={o || m ? 1 : 0}>
           <Box key="head" flexDirection="row" gap={1} alignItems="center">
             <Box flexGrow={1} flexShrink={1} minWidth={0}>
               {pressable(`sec-${id}`, [{ text: o ? '▾ ' : '▸ ', dim: true }, { text: title, bold: true }], () => void flip(id))}
@@ -740,7 +780,16 @@ export const register: Register = on => {
                 </Text>
               </Box>
             )}
+            {hasMenu && <Box key="cog" flexShrink={0}>{cog(`cfg-${id}`, m, () => void flip(`${MENU}${id}`), 'body')}</Box>}
           </Box>
+          {m && (
+            <Box key="menu" flexDirection="column" gap={1}>
+              {rule('sep')}
+              {(EXTRAS[id] ?? []).length > 0 && heading('mh', 'SHOW IN THIS CARD')}
+              {(EXTRAS[id] ?? []).length > 0 && extraTicks(id)}
+              {more?.() as never}
+            </Box>
+          )}
           {o && (
             <Box key="body" flexDirection="column" gap={1}>
               {body() as never}
@@ -775,32 +824,48 @@ export const register: Register = on => {
       </Box>
     )
 
+    // A transcript read has landed (its time may be 0 under a test clock; its models are what count).
+    const hasScan = sc.at > 0 || Object.keys(sc.byModel).length > 0
     // Until the first transcript read lands, the totals are what this mod counted live.
-    const total = sc.at > 0 ? scanTotal(sc) : list.reduce((acc, t) => sum(acc, taskTotal(t)), empty())
+    const total = hasScan ? scanTotal(sc) : list.reduce((acc, t) => sum(acc, taskTotal(t)), empty())
+    // One snapshot for every breakdown that must add up: the transcript read and the engine's cost read with it.
+    // Rows are scaled by `factor` to that cost, so they sum to `snapCost`, not to the live cost that may have moved on.
+    const snapCost = hasScan && sc.costUsd != null ? sc.costUsd : (v.costUsd ?? total.usd)
+    // The live cost is ahead of the snapshot while a turn runs (or until the next read lands).
+    const isUpdating = v.isRunning || (v.costUsd !== null && hasScan && Math.abs(v.costUsd - snapCost) > 0.005)
+    const perReq = (cost: number, n: number) => (n > 0 ? usd(cost / n) : '—')
+    // Main thread and sub-agents, from the same snapshot.
+    const mainU = Object.values(sc.byModel).reduce((acc, x) => sum(acc, x.main), empty())
+    const agentU = Object.values(sc.byModel).reduce((acc, x) => sum(acc, x.agents), empty())
+    // One count of sub-agents: every one this session, known from the tasks (all kept) and the live cards.
+    const agentIds = new Set([...list.flatMap(t => t.agents.map(a => a.id)), ...cards.map(c => c.id)])
+    const agentCount = agentIds.size
+    // Cache hit rate: the share of all input read from the cache.
+    const inputAll = total.input + total.cacheWrite + total.cacheRead
+    const hitRate = inputAll > 0 ? total.cacheRead / inputAll : null
 
-    // ---- vitals: always shown
+    // ---- main: always shown
     // Measured against the limit the session actually compacts at; the engine's own percent is against the model's window.
     const ctxMax = v.ctxLimit > 0 ? v.ctxLimit : v.ctxWindow
     const ctxPct = v.ctxTokens !== null && ctxMax > 0 ? Math.round((100 * v.ctxTokens) / ctxMax) : v.ctxLimit > 0 ? null : v.ctxPct
     const ctxColor: BarColor = ctxPct === null ? 'inactive' : ctxPct >= tg.ctxBad ? 'error' : ctxPct >= tg.ctxWarn ? 'warning' : 'success'
     const runFor = now - startedAt
     const actMs = activeMs(act, now)
+    const mainEx = extrasOf(lay, 'vitals')
     // ---- cache health: read from the transcripts; requests this turn from the live log
     const ch = sc.cache
     const turnReqs = tn && tn.startedAt > 0 ? callList.filter(c => c.who === 'main thread' && c.at >= tn.startedAt).length : 0
     const memColor: BarColor = !ch || ch.memoryChars === null ? 'inactive' : ch.memoryChars > tg.memFine ? 'error' : ch.memoryChars > tg.memGood ? 'warning' : 'success'
     const memWord = memColor === 'error' ? 'Bad' : memColor === 'warning' ? 'Fine' : 'Good'
     const cacheWarning = ch && ch.memoryChars !== null && ch.memoryChars > tg.memGood ? `memory index ${k(ch.memoryChars)} chars (target ${tg.memGood.toLocaleString('en-US')})` : null
-    // The title folds away the stats row (cost, running for, active, requests); Session Totals keeps cost and requests.
+    // The title folds away the stats row (cost, running for, requests, cost per request).
     const vitalsOpen = !isOpen(VITALS_FOLDED)
     const settingsOpen = isOpen(SETTINGS_OPEN)
     // The warning line takes the memory index's colour when that is what is over; else orange.
     const warnColor: BarColor = memColor === 'error' || memColor === 'warning' ? memColor : 'warning'
-    const setLayout = (msg: unknown) => void saveLayout($, msg).catch(() => undefined)
     const titleOf = (id: string) => SECTIONS.find(x => x.id === id)?.title ?? id
     const chipItems = lay.order.map(id => ({ id, title: titleOf(id), isShown: !lay.hidden.includes(id) }))
     // Dragging needs a Client; a surface without one (mobile) moves a section up a place by its arrow.
-    const palette = theme ? { palette: { bg: theme.card, fg: theme.fg, muted: theme.muted, accent: theme.keys.claude ?? theme.fg } } : {}
     const themeChoices = [{ id: 'app', name: 'Original' }, ...Object.entries(THEMES).map(([id, t]) => ({ id, name: t.name }))]
     const chips = Client ? (
       <Client key={CHIPS} module="./chips.tsx" props={{ items: chipItems, ...palette }} height={chipItems.length} />
@@ -820,7 +885,7 @@ export const register: Register = on => {
         ))}
       </Box>
     )
-    // A labelled meter row in the Vitals card: name, bar, value, and a note on the right when wide.
+    // A labelled meter row in the Main card: name, bar, value, and a note on the right when wide.
     const LABEL_W = isNarrow ? 8 : 13
     const meterRow = (key: string, label: string, value: number, color: BarColor, shown: unknown, note: string) => (
       <Box key={key} flexDirection="row" gap={1} alignItems="center">
@@ -832,6 +897,39 @@ export const register: Register = on => {
         </Box>
         {cell('p', 8, shown)}
         {!isNarrow && cell('r', 10, <Text dimColor tabular size="footnote" wrap="truncate-end">{note}</Text>)}
+      </Box>
+    )
+    // The limits the bars are coloured by: one stepper row each, in the Cache card's menu.
+    const targetSteppers = () => (
+      <Box key="targets" flexDirection="column" gap={1}>
+        {heading('tg', 'TARGETS · WHAT THE BARS ARE COLOURED BY')}
+        <Box key="rows" flexDirection="column">
+          {TARGETS.map(d => (
+            <Box key={d.id} flexDirection="row" gap={1} alignItems="center">
+              <Box width={27} flexShrink={0}>
+                <Text dimColor wrap="truncate-end">{d.label}</Text>
+              </Box>
+              <Box width={2} flexShrink={0}>{pressable(`tg-${d.id}-dn`, [{ text: '−', bold: canStep(lay, d.id, -1), dim: !canStep(lay, d.id, -1) }], () => setLayout({ target: { id: d.id, by: -1 } }))}</Box>
+              <Box width={9} flexShrink={0} justifyContent="flex-end">
+                <Text tabular bold={tg[d.id] !== d.value} color={tg[d.id] !== d.value ? 'claude' : undefined}>{tg[d.id].toLocaleString('en-US')}</Text>
+              </Box>
+              <Box width={2} flexShrink={0}>{pressable(`tg-${d.id}-up`, [{ text: '+', bold: canStep(lay, d.id, 1), dim: !canStep(lay, d.id, 1) }], () => setLayout({ target: { id: d.id, by: 1 } }))}</Box>
+            </Box>
+          ))}
+        </Box>
+        {lay.targets && pressable('tg-reset', [{ text: '↺ Back to the defaults', dim: true }], () => setLayout({ target: 'reset' }))}
+      </Box>
+    )
+    // One group of the settings: a label and a one-line note that wrap, then its controls. Below 60 columns in the
+    // terminal each group takes the full row; wider (and on surfaces that wrap by their own width) they share rows.
+    const isStacked = !flows && inner < 60
+    const group = (key: string, label: string, note: string, body: unknown) => (
+      <Box key={key} flexDirection="column" gap={1} width={isStacked ? '100%' : undefined} flexGrow={1} flexShrink={1} minWidth={Math.min(24, inner)}>
+        <Box key="h" flexDirection="column">
+          <Text bold dimColor wrap="wrap">{label}</Text>
+          <Text size="footnote" dimColor wrap="wrap">{note}</Text>
+        </Box>
+        {body as never}
       </Box>
     )
     const vitalsCard = (
@@ -847,7 +945,7 @@ export const register: Register = on => {
           </Box>
           <Text dimColor tabular>
             {v.isRunning ? 'working' : 'idle'}
-            {v.ttftMs !== null ? ` · first token ${dur(v.ttftMs)}` : ''}
+            {mainEx.ttft && v.ttftMs !== null ? ` · first token ${dur(v.ttftMs)}` : ''}
           </Text>
         </Box>
         <Box key="ctx" flexDirection="column">
@@ -863,8 +961,10 @@ export const register: Register = on => {
         {vitalsOpen && stats('s1', [
           stat('cost', v.costUsd !== null ? 'COST' : 'COST (EST.)', usd(v.costUsd ?? total.usd), { color: 'claude' }),
           stat('run', 'RUNNING FOR', clock(runFor), { sub: `since ${when(startedAt)}` }),
-          stat('act', 'ACTIVE', clock(actMs), { sub: `${runFor > 0 ? Math.round((100 * actMs) / runFor) : 0}% of the time` }),
-          stat('calls', 'REQUESTS', String(total.calls), { sub: `${cards.length} sub-agent${cards.length === 1 ? '' : 's'}` }),
+          ...(mainEx.active ? [stat('act', 'ACTIVE', clock(actMs), { sub: `${runFor > 0 ? Math.round((100 * actMs) / runFor) : 0}% of the time` })] : []),
+          stat('calls', 'REQUESTS', String(total.calls)),
+          // Cost and requests from the same snapshot, so the quotient is of one moment.
+          stat('cpr', 'COST / REQUEST', perReq(snapCost, total.calls)),
         ])}
         {v.limits.length > 0 && (
           <Box key="limits" flexDirection="column">
@@ -880,100 +980,55 @@ export const register: Register = on => {
             )}
           </Box>
         )}
-        {!lay.hideCacheBar && ch && ch.memoryChars !== null && (
-          <Box key="cache-bar" flexDirection="column">
-            {meterRow(
-              'row',
-              'Cache Health',
-              Math.min(1, ch.memoryChars / tg.memBar),
-              memColor,
-              <Text tabular size="footnote" bold weight="semibold" color={memColor}>{memWord}</Text>,
-              `${k(ch.memoryChars)} chars`,
-            )}
-            <Text key="why" size="footnote" dimColor wrap="wrap">
-              {`Memory index loaded into every request: ${ch.memoryChars.toLocaleString('en-US')} of ${tg.memBar.toLocaleString('en-US')} chars. Good to ${tg.memGood.toLocaleString('en-US')} (target), Fine to ${tg.memFine.toLocaleString('en-US')}, Bad past it. Start ${k(ch.first)} · ${ch.rebuildCount} rebuild${ch.rebuildCount === 1 ? '' : 's'}.`}
-            </Text>
-          </Box>
-        )}
         <Box key="foot" flexDirection="row" gap={1} alignItems="flex-end" justifyContent="flex-end">
           {cacheWarning !== null && (
             <Box flexGrow={1} flexShrink={1} minWidth={0}>
               <Text key="cache-warn" color={warnColor} size="footnote" wrap="wrap">
                 <Text size="body">⚠</Text>
-                {` Cache: ${cacheWarning}. See Cache Health.`}
+                {` Cache: ${cacheWarning}. See Cache.`}
               </Text>
             </Box>
           )}
           {/* Title size on the surface's own Button; under a theme its one-line surface draws one size, so bold there. Never dim: full ink, accent while open. */}
           <Box key="cog" flexShrink={0}>
-            {pressable('settings', [{ text: '⚙', color: settingsOpen ? 'claude' : undefined, bold: true, size: 'title' }], () => void flip(SETTINGS_OPEN))}
+            {cog('settings', settingsOpen, () => void flip(SETTINGS_OPEN))}
           </Box>
         </Box>
         {settingsOpen && (
           <Box key="settings-body" flexDirection="column" gap={1}>
-            {/* Longer than any pane, held to one line by its box, so it spans the card with no clip mark. */}
-            <Box key="sep" height={1} overflow="hidden">
-              <Text dimColor wrap="wrap">{'─'.repeat(Math.max(inner, 600))}</Text>
-            </Box>
+            {rule('sep')}
+            {/* Labelled groups that wrap as whole columns: side by side when they fit, stacked when narrow.
+                Each takes an equal share of a row and never less than its minimum, so no row overflows. */}
             <Box key="cols" flexDirection="row" flexWrap="wrap" columnGap={4} rowGap={1}>
-              <Box key="secs" flexDirection="column" flexShrink={0} gap={1}>
-                {heading('sh', 'SECTIONS · TICK TO SHOW · DRAG TO MOVE')}
-                {chips}
-                {Client ? (
-                  <Client key={`${TICKS}-flag`} module="./chips.tsx" props={{ isFixed: true, items: [{ id: 'cacheBar', title: 'Cache Health bar in this card', isShown: !lay.hideCacheBar }], ...palette }} height={1} />
-                ) : (
-                  pressable('cache-bar-flag', [
-                    { text: lay.hideCacheBar ? '☐' : '☑', color: lay.hideCacheBar ? undefined : 'claude', dim: lay.hideCacheBar },
-                    { text: '  Cache Health bar in this card', dim: lay.hideCacheBar },
-                  ], () => setLayout({ flag: 'cacheBar' }))
-                )}
-              </Box>
-              <Box key="themes" flexDirection="column" flexShrink={0} gap={1}>
-                {heading('th', 'THEME')}
-                {Client ? (
-                  <Client key={`${TICKS}-theme`} module="./chips.tsx" props={{ isFixed: true, items: themeChoices.map(o => ({ id: `theme:${o.id}`, title: o.name, isShown: (lay.theme ?? 'app') === o.id })), ...palette }} height={themeChoices.length} />
-                ) : (
-                  <Box key="theme-list" flexDirection="column">
-                    {themeChoices.map(o => {
-                      const isOn = (lay.theme ?? 'app') === o.id
-                      return pressable(`theme-${o.id}`, [{ text: isOn ? '☑' : '☐', dim: !isOn }, { text: ` ${o.name}`, bold: isOn, dim: !isOn }], () => setLayout({ theme: o.id === 'app' ? null : o.id }))
-                    })}
-                  </Box>
-                )}
-              </Box>
-              <Box key="targets" flexDirection="column" flexShrink={0} gap={1}>
-                {heading('tg', 'CACHE TARGETS')}
-                <Box key="rows" flexDirection="column">
-                  {TARGETS.map(d => (
-                    <Box key={d.id} flexDirection="row" gap={1} alignItems="center">
-                      <Box width={27} flexShrink={0}>
-                        <Text dimColor wrap="truncate-end">{d.label}</Text>
-                      </Box>
-                      <Box width={2} flexShrink={0}>{pressable(`tg-${d.id}-dn`, [{ text: '−', bold: canStep(lay, d.id, -1), dim: !canStep(lay, d.id, -1) }], () => setLayout({ target: { id: d.id, by: -1 } }))}</Box>
-                      <Box width={9} flexShrink={0} justifyContent="flex-end">
-                        <Text tabular bold={tg[d.id] !== d.value} color={tg[d.id] !== d.value ? 'claude' : undefined}>{tg[d.id].toLocaleString('en-US')}</Text>
-                      </Box>
-                      <Box width={2} flexShrink={0}>{pressable(`tg-${d.id}-up`, [{ text: '+', bold: canStep(lay, d.id, 1), dim: !canStep(lay, d.id, 1) }], () => setLayout({ target: { id: d.id, by: 1 } }))}</Box>
-                    </Box>
-                  ))}
+              {group('cards', 'CARDS', 'Tick to show, drag to move. Each card has its own ⚙ for its extras.', chips)}
+              {group('main-extras', 'MAIN CARD', 'Extras shown in this card.', extraTicks('vitals'))}
+              {group('themes', 'THEME', 'Colours for the whole pane.', Client ? (
+                <Client key={`${TICKS}-theme`} module="./chips.tsx" props={{ isFixed: true, items: themeChoices.map(o => ({ id: `theme:${o.id}`, title: o.name, isShown: (lay.theme ?? 'app') === o.id })), ...palette }} height={themeChoices.length} />
+              ) : (
+                <Box key="theme-list" flexDirection="column">
+                  {themeChoices.map(o => {
+                    const isOn = (lay.theme ?? 'app') === o.id
+                    return pressable(`theme-${o.id}`, [{ text: isOn ? '☑' : '☐', dim: !isOn }, { text: ` ${o.name}`, bold: isOn, dim: !isOn }], () => setLayout({ theme: o.id === 'app' ? null : o.id }))
+                  })}
                 </Box>
-                {lay.targets && pressable('tg-reset', [{ text: '↺ Back to the defaults', dim: true }], () => setLayout({ target: 'reset' }))}
-              </Box>
+              ))}
             </Box>
           </Box>
         )}
       </Box>
     )
 
-    // ---- token kinds: one row per kind; the bar and COST are its share of the weighted cost, then its tokens and their share
+    // ---- token kinds: one row per kind; the bar and COST are its share of the cost (or its dollars, given `dollars`),
+    // then, with `withTokens`, its tokens and their share
     const KIND_W = 11
-    const kinds = (key: string, u: Usage, room = inner) => {
+    const kinds = (key: string, u: Usage, room = inner, withTokens = true, dollars?: number) => {
       const tokens = u.input + u.cacheWrite + u.cacheRead + u.output
       const cost = weighted(u)
-      // Cost leads: the bar and COST are the kind's share of the weighted cost; after a thin line, its tokens and their share.
+      // Cost leads: the bar and COST are the kind's share of the cost (split by list price); after a thin line, its tokens and their share.
       // The token side (line, TOKENS, %) shows whole or not at all, so the bar keeps at least 10 cells.
-      const hasTokens = room >= 44
-      const barW = room - KIND_W - 1 - 6 - (hasTokens ? 2 + 8 + 6 : 0)
+      const hasTokens = withTokens && room >= 44
+      const costW = dollars !== undefined ? 7 : 5
+      const barW = room - KIND_W - 1 - (costW + 1) - (hasTokens ? 2 + 8 + 6 : 0)
       const line = (k: string) => (
         <Box key={k} width={1} flexShrink={0}>
           <Text dimColor>│</Text>
@@ -984,7 +1039,7 @@ export const register: Register = on => {
           <Box key="head" flexDirection="row" gap={1}>
             <Box width={KIND_W} flexShrink={0}>{heading('k', 'KIND')}</Box>
             <Box flexGrow={1} flexShrink={1} minWidth={0}>{heading('b', barW >= 16 ? 'SHARE OF COST' : 'SHARE')}</Box>
-            {cell('c', 5, heading('c', 'COST'))}
+            {cell('c', costW, heading('c', 'COST'))}
             {hasTokens && line('l')}
             {hasTokens && cell('t', 7, heading('t', 'TOKENS'))}
             {hasTokens && cell('p', 5, heading('p', '%'))}
@@ -1000,7 +1055,7 @@ export const register: Register = on => {
                 <Box flexGrow={1} flexShrink={1} minWidth={0}>
                   {strip('bar', [{ value: costShare, color: kd.color }], { track: true, cells: barW })}
                 </Box>
-                {cell('c', 5, n(`${Math.round(100 * costShare)}%`, { bold: true }))}
+                {cell('c', costW, n(dollars !== undefined ? usd(dollars * costShare) : `${Math.round(100 * costShare)}%`, { bold: true }))}
                 {hasTokens && line('l')}
                 {hasTokens && cell('t', 7, n(k(u[kd.field]), { dim: true }))}
                 {hasTokens && cell('p', 5, n(`${Math.round(100 * share)}%`, { dim: true }))}
@@ -1019,14 +1074,25 @@ export const register: Register = on => {
       ])
       .filter(r => r.u.calls > 0)
       .sort((a, b) => b.u.usd - a.u.usd)
+    const sessEx = extrasOf(lay, 'session')
+    const mainCost = mainU.usd * factor
+    const agentCost = agentU.usd * factor
     const sessionBody = () => [
-      stats('s', [
-        stat('c', 'REQUESTS', String(total.calls)),
-        stat('f', 'FRESH', k(fresh(total))),
-        stat('r', 'CACHE READ', k(total.cacheRead)),
-        stat('w', 'WEIGHTED', k(weighted(total)), { color: 'claude' }),
+      // The total every row below adds up to: the snapshot's cost, marked while the live cost has moved past it.
+      <Box key="tot" flexDirection="row" justifyContent="space-between">
+        {heading('l', `TOTAL AT ${hasScan ? hhmm(sc.at) : '—'}${isUpdating ? ' · UPDATING' : ''}`)}
+        {n(usd(snapCost), { bold: true, color: 'claude' })}
+      </Box>,
+      hasScan && stats('s', [
+        stat('m', 'MAIN THREAD', usd(mainCost), { sub: `${perReq(mainCost, mainU.calls)} / request` }),
+        stat('a', 'SUB-AGENTS', usd(agentCost), { sub: `${perReq(agentCost, agentU.calls)} / request` }),
       ]),
-      kinds('kinds', total),
+      sessEx.tokens && stats('tk', [
+        stat('f', 'FRESH', k(fresh(total)), { sub: 'input + write + output' }),
+        stat('r', 'CACHE READ', k(total.cacheRead)),
+        stat('w', 'WEIGHTED', k(weighted(total)), { sub: 'tokens by price' }),
+      ]),
+      kinds('kinds', total, inner, sessEx.tokens, hasScan ? snapCost : undefined),
       byModel.length > 0 && (
         <Box key="who" flexDirection="column">
           <Box key="head" flexDirection="row" gap={1}>
@@ -1034,6 +1100,7 @@ export const register: Register = on => {
             <Box flexGrow={1} flexShrink={1} minWidth={0}>{heading('w', 'WHO · MODEL')}</Box>
             {isWide && cell('c', 6, heading('c', 'CALLS'))}
             {cell('o', 7, heading('o', 'OUTPUT'))}
+            {sessEx.tokens && cell('w', 7, heading('w', 'WEIGHT'))}
             {cell('u', 8, heading('u', 'COST'))}
           </Box>
           {byModel.map(r => (
@@ -1049,6 +1116,7 @@ export const register: Register = on => {
               </Box>
               {isWide && cell('c', 6, n(String(r.u.calls), { dim: true }))}
               {cell('o', 7, n(k(r.u.output)))}
+              {sessEx.tokens && cell('w', 7, n(`${Math.round((100 * weighted(r.u)) / (weighted(total) || 1))}%`, { dim: true }))}
               {cell('u', 8, n(usd(r.u.usd * factor), { bold: true }))}
             </Box>
           ))}
@@ -1056,11 +1124,23 @@ export const register: Register = on => {
         </Box>
       ),
       <Text key="src" size="footnote" dimColor>
-        {sc.at > 0 ? `From the transcripts, main and every sub-agent, read at ${hhmm(sc.at)} (after each turn).` : 'Reading the transcripts…'}
+        {hasScan ? `From the transcripts, main and every sub-agent, read at ${hhmm(sc.at)} (after each turn). Rows add up to the total above.` : 'Reading the transcripts…'}
       </Text>,
+      sessEx.csv && (
+        <Box key="actions" flexDirection="row" flexWrap="wrap" gap={1} alignItems="center">
+          <Button key="copy-summary" label="Copy tasks (CSV)" onPress={p => void copy('the task summary', summaryCsv(list, factor), p.surface)} />
+          <Button key="copy-calls" label={`Copy ${callList.length} requests (CSV)`} onPress={p => void copy('the request log', callsCsv(callList, factor), p.surface)} />
+          {note !== '' && (
+            <Text dimColor size="footnote">
+              {note}
+            </Text>
+          )}
+        </Box>
+      ),
     ]
 
     // ---- tasks
+    const taskEx = extrasOf(lay, 'tasks')
     const last = list.at(-1) ?? newTask('Unlabelled', now)
     const shownTasks = list.filter(t => t === last || taskTotal(t).calls > 0).slice().reverse()
     const taskOpen = (t: Task) => (t === last) !== toggles.includes(t.startedAt)
@@ -1121,7 +1201,7 @@ export const register: Register = on => {
           {o &&
             (u.calls > 0 ? (
               <Box key="body" flexDirection="column" gap={1}>
-                {kinds('kinds', u, inner - 4)}
+                {taskEx.kinds && kinds('kinds', u, inner - 4)}
                 {taskTable(t)}
               </Box>
             ) : (
@@ -1133,14 +1213,17 @@ export const register: Register = on => {
       )
     }
     const tasksBody = () => [
-      <Text key="hint" size="footnote" dimColor>
-        A task runs from one mark_task to the next. Click a task to open or close it.
-      </Text>,
+      taskEx.hint && (
+        <Text key="hint" size="footnote" dimColor>
+          A task runs from one mark_task to the next. Click a task to open or close it.
+        </Text>
+      ),
       ...shownTasks.map(taskCard),
     ]
 
     // ---- recent requests
     const recentCalls = callList.slice(-15).reverse()
+    const reqTok = extrasOf(lay, 'requests').tokens
     const requestsBody = () =>
       recentCalls.length === 0
         ? [<Text key="none" dimColor>No requests yet.</Text>]
@@ -1148,9 +1231,9 @@ export const register: Register = on => {
             <Box key="head" flexDirection="row" gap={1}>
               {cell('t', 5, heading('t', 'TIME'), false)}
               <Box flexGrow={1} flexShrink={1} minWidth={0}>{heading('w', 'WHO')}</Box>
-              {isWide && cell('i', 7, heading('i', 'IN+CW'))}
-              {!isNarrow && cell('r', 7, heading('r', 'C.READ'))}
-              {cell('o', 6, heading('o', 'OUT'))}
+              {reqTok && isWide && cell('i', 7, heading('i', 'IN+CW'))}
+              {reqTok && !isNarrow && cell('r', 7, heading('r', 'C.READ'))}
+              {reqTok && cell('o', 6, heading('o', 'OUT'))}
               {cell('u', 7, heading('u', 'COST'))}
             </Box>,
             ...recentCalls.map((c, i) => (
@@ -1162,48 +1245,84 @@ export const register: Register = on => {
                     <Text dimColor>{` · ${modelName(c.model)}`}</Text>
                   </Text>
                 </Box>
-                {isWide && cell('i', 7, n(k(c.input + c.cacheWrite)))}
-                {!isNarrow && cell('r', 7, n(k(c.cacheRead), { dim: true }))}
-                {cell('o', 6, n(k(c.output)))}
+                {reqTok && isWide && cell('i', 7, n(k(c.input + c.cacheWrite)))}
+                {reqTok && !isNarrow && cell('r', 7, n(k(c.cacheRead), { dim: true }))}
+                {reqTok && cell('o', 6, n(k(c.output)))}
                 {cell('u', 7, n(usd(c.usd * factor), { bold: true }))}
               </Box>
             )),
           ]
 
-    // ---- sub-agents
+    // ---- sub-agents: the running ones live; totals for all of them from the snapshot
     const running = cards.filter(c => c.status === 'running').length
-    const agentsBody = () =>
-      cards.length === 0
-        ? [<Text key="none" dimColor>No sub-agents this session.</Text>]
-        : cards
-            .slice()
-            .reverse()
-            .slice(0, 12)
-            .map(c => {
-              const color = c.status === 'running' ? 'claude' : c.status === 'done' ? 'success' : 'error'
-              const took = (c.endedAt ?? now) - c.spawnedAt
-              return (
-                <Box key={c.id} {...CARD}>
-                  <Box key="h" flexDirection="row" gap={1}>
-                    <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                      <Text wrap="truncate-end">
-                        <Text color={color}>{c.status === 'running' ? '● ' : c.status === 'done' ? '✓ ' : '✗ '}</Text>
-                        <Text bold>{c.description || c.type}</Text>
-                      </Text>
-                    </Box>
-                    <Text dimColor tabular>{clock(took)}</Text>
-                  </Box>
-                  <Text key="m" dimColor tabular wrap="truncate-end">
-                    {c.type} · {modelName(c.model)} · {c.steps} steps · ctx {k(c.ctx)} · out {k(c.out)}
-                  </Text>
-                  {c.lastTool !== '' && (
-                    <Text key="t" dimColor size="footnote" wrap="truncate-end">
-                      ↳ {c.lastTool}
-                    </Text>
-                  )}
+    const agEx = extrasOf(lay, 'agents')
+    const agentCard = (c: AgentCard) => {
+      const color = c.status === 'running' ? 'claude' : c.status === 'done' ? 'success' : 'error'
+      const took = (c.endedAt ?? now) - c.spawnedAt
+      return (
+        <Box key={c.id} {...CARD}>
+          <Box key="h" flexDirection="row" gap={1}>
+            <Box flexGrow={1} flexShrink={1} minWidth={0}>
+              <Text wrap="truncate-end">
+                <Text color={color}>{c.status === 'running' ? '● ' : c.status === 'done' ? '✓ ' : '✗ '}</Text>
+                <Text bold>{c.description || c.type}</Text>
+              </Text>
+            </Box>
+            <Text dimColor tabular>{clock(took)}</Text>
+          </Box>
+          <Text key="m" dimColor tabular wrap="truncate-end">
+            {c.type} · {modelName(c.model)} · {c.steps} steps · ctx {k(c.ctx)} · out {k(c.out)}
+          </Text>
+          {c.lastTool !== '' && (
+            <Text key="t" dimColor size="footnote" wrap="truncate-end">
+              ↳ {c.lastTool}
+            </Text>
+          )}
+        </Box>
+      )
+    }
+    // Per type and model, from the live counts (all tasks), scaled like every other row.
+    const agentGroups = [...list.flatMap(t => t.agents).reduce((m, r) => {
+      const key = `${r.type} · ${r.models.map(modelName).join(', ') || '—'}`
+      const g = m.get(key) ?? { n: 0, u: empty() }
+      m.set(key, { n: g.n + 1, u: sum(g.u, r.usage) })
+      return m
+    }, new Map<string, { n: number; u: Usage }>())].sort((x, y) => y[1].u.usd - x[1].u.usd)
+    const agentsBody = () => {
+      const live = cards.filter(c => c.status === 'running').slice().reverse()
+      const done = cards.filter(c => c.status !== 'running').slice().reverse().slice(0, 12)
+      return [
+        stats('s', [
+          stat('n', 'SUB-AGENTS', String(agentCount), { sub: `${running} running`, w: stat3 }),
+          stat('c', 'COST', usd(agentCost), { color: 'claude', sub: `${snapCost > 0 ? Math.round((100 * agentCost) / snapCost) : 0}% of ${usd(snapCost)}`, w: stat3 }),
+          stat('r', 'COST / REQUEST', perReq(agentCost, agentU.calls), { sub: `${agentU.calls} requests`, w: stat3 }),
+        ]),
+        agEx.breakdown && agentGroups.length > 0 && (
+          <Box key="types" flexDirection="column">
+            <Box key="head" flexDirection="row" gap={1}>
+              <Box flexGrow={1} flexShrink={1} minWidth={0}>{heading('t', 'TYPE · MODEL')}</Box>
+              {cell('n', 5, heading('n', 'RUNS'))}
+              {isWide && cell('c', 6, heading('c', 'CALLS'))}
+              {cell('u', 8, heading('u', 'COST'))}
+            </Box>
+            {agentGroups.map(([key, g2]) => (
+              <Box key={key} flexDirection="row" gap={1}>
+                <Box flexGrow={1} flexShrink={1} minWidth={0}>
+                  <Text wrap="truncate-end">{key}</Text>
                 </Box>
-              )
-            })
+                {cell('n', 5, n(String(g2.n), { dim: true }))}
+                {isWide && cell('c', 6, n(String(g2.u.calls), { dim: true }))}
+                {cell('u', 8, n(usd(g2.u.usd * factor), { bold: true }))}
+              </Box>
+            ))}
+          </Box>
+        ),
+        live.length === 0 ? <Text key="none" dimColor>None running.</Text> : null,
+        ...live.map(agentCard),
+        agEx.finished && done.length > 0 && heading('fh', 'FINISHED'),
+        ...(agEx.finished ? done.map(agentCard) : []),
+      ]
+    }
 
     // ---- permissions
     const gt = BUCKETS.reduce((a, b) => ({ allowed: a.allowed + g.totals[b].allowed, asked: a.asked + g.totals[b].asked, denied: a.denied + g.totals[b].denied }), { allowed: 0, asked: 0, denied: 0 })
@@ -1230,7 +1349,7 @@ export const register: Register = on => {
           { value: gt.asked, color: 'warning' },
           { value: gt.denied, color: 'error' },
         ], { cells: inner }),
-      g.recent.length > 0 && (
+      extrasOf(lay, 'gate').recent && g.recent.length > 0 && (
         <Box key="recent" flexDirection="column">
           {heading('h', 'LATEST CHECKS')}
           {g.recent
@@ -1256,6 +1375,10 @@ export const register: Register = on => {
               stat('c', 'COST ADDED', rc.costDelta !== null ? usd(rc.costDelta) : '—', { color: 'claude' }),
               stat('t', 'TOOL CALLS', String(rc.tools), { sub: `${rc.edits} edit${rc.edits === 1 ? '' : 's'}` }),
               stat('e', 'ERRORS', String(rc.errors), { color: rc.errors > 0 ? 'error' : undefined, sub: `${rc.agents} sub-agent${rc.agents === 1 ? '' : 's'}` }),
+              ...(rc.cacheHit != null ? [stat('h', 'CACHE HIT', `${Math.round(100 * rc.cacheHit)}%`, { sub: 'input from the cache' })] : []),
+              ...(extrasOf(lay, 'turn').requests
+                ? [stat('q', 'REQUESTS', String(rc.requests ?? turnReqs), { color: (rc.requests ?? turnReqs) > tg.turnMax ? 'error' : undefined, sub: `limit ${tg.turnMax}` })]
+                : []),
             ]),
           ]
 
@@ -1264,13 +1387,14 @@ export const register: Register = on => {
       const parts = name.split('__')
       return parts[0] === 'mcp' && parts.length >= 3 ? parts.slice(2).join('__') : name
     }
+    const cacheEx = extrasOf(lay, 'cache')
     const cacheBody = () =>
       !ch
         ? [<Text key="none" dimColor>{sc.at > 0 ? 'No cache data in the transcripts.' : 'Reading the transcripts…'}</Text>]
         : [
             stats('c', [
+              stat('h', 'CACHE HIT RATE', hitRate !== null ? `${Math.round(100 * hitRate)}%` : '—', { color: 'claude', sub: 'input read from the cache', w: stat3 }),
               stat('f', 'STARTING LOAD', k(ch.first), { sub: 'first request', w: stat3 }),
-              stat('t', 'REQUESTS THIS TURN', String(turnReqs), { color: turnReqs > tg.turnMax ? 'error' : undefined, sub: `limit ${tg.turnMax}`, w: stat3 }),
               stat('r', 'REBUILDS', String(ch.rebuildCount), { sub: `${k(ch.rebuildTokens)} written`, w: stat3 }),
             ]),
             ch.memoryChars !== null && (
@@ -1288,7 +1412,7 @@ export const register: Register = on => {
                 </Text>
               </Box>
             ),
-            <Box key="rb" flexDirection="column">
+            cacheEx.rebuilds && <Box key="rb" flexDirection="column">
               {heading('h', 'REBUILDS · REQUESTS WRITING OVER 50K')}
               {ch.rebuilds.length === 0 ? (
                 <Text key="none" dimColor>None.</Text>
@@ -1307,7 +1431,7 @@ export const register: Register = on => {
                   ))
               )}
             </Box>,
-            <Box key="tl" flexDirection="column">
+            cacheEx.tools && <Box key="tl" flexDirection="column">
               {heading('h', 'LARGEST TOOL RESULTS · CHARACTERS')}
               {ch.tools.length === 0 ? (
                 <Text key="none" dimColor>None yet.</Text>
@@ -1325,10 +1449,11 @@ export const register: Register = on => {
           ]
 
     // ---- activity
+    const shownEvents = extrasOf(lay, 'log').info ? events : events.filter(l => l.kind !== 'info')
     const logBody = () =>
-      events.length === 0
+      shownEvents.length === 0
         ? [<Text key="none" dimColor>Nothing yet.</Text>]
-        : events
+        : shownEvents
             .slice(-20)
             .reverse()
             .map((l, i) => (
@@ -1349,12 +1474,12 @@ export const register: Register = on => {
     }
     const errorsNow = events.filter(l => l.kind === 'error').length
     const byId: Record<string, () => ReturnType<typeof section>> = {
-      session: () => section('session', 'Session Totals', `${usd(v.costUsd ?? total.usd)} · ${k(weighted(total))} weighted`, sessionBody),
+      session: () => section('session', 'Session Totals', hasScan ? `main ${usd(mainCost)} · agents ${usd(agentCost)}${isUpdating ? ' · updating' : ''}` : '—', sessionBody),
       tasks: () => section('tasks', 'Tasks', `${shownTasks.length} · now: ${last?.label ?? '—'}`, tasksBody),
       requests: () => section('requests', 'Recent Requests', `${callList.length} seen`, requestsBody),
-      agents: () => section('agents', 'Sub-Agents', cards.length === 0 ? 'none' : `${running} running · ${cards.length} total`, agentsBody),
+      agents: () => section('agents', 'Sub-Agents', agentCount === 0 ? 'none' : `${running} running`, agentsBody),
       gate: () => section('gate', 'Permissions', `${gt.allowed} ok · ${gt.asked} asked · ${gt.denied} denied`, gateBody),
-      cache: () => section('cache', 'Cache Health', ch ? `start ${k(ch.first)} · ${ch.rebuildCount} rebuild${ch.rebuildCount === 1 ? '' : 's'}` : '—', cacheBody),
+      cache: () => section('cache', 'Cache', hitRate !== null ? `${Math.round(100 * hitRate)}% hit${ch ? ` · ${memWord}` : ''}` : '—', cacheBody, targetSteppers),
       turn: () => section('turn', 'Last Turn', rc ? `${dur(rc.durationMs)}${rc.costDelta !== null ? ` · +${usd(rc.costDelta)}` : ''}` : '—', turnBody),
       log: () => section('log', 'Activity', errorsNow > 0 ? `${events.length} events · ${errorsNow} errors` : `${events.length} events`, logBody),
     }
@@ -1369,20 +1494,11 @@ export const register: Register = on => {
       <Box flexDirection="column" gap={1} {...(theme ? { flexGrow: 1 } : {})}>
         {vitalsCard}
         {lay.order.filter(id => !lay.hidden.includes(id)).map(id => byId[id]?.())}
-        <Box key="actions" flexDirection="row" flexWrap="wrap" gap={1} alignItems="center">
-          <Button key="copy-summary" label="Copy tasks (CSV)" onPress={p => void copy('the task summary', summaryCsv(list, factor), p.surface)} />
-          <Button key="copy-calls" label={`Copy ${callList.length} requests (CSV)`} onPress={p => void copy('the request log', callsCsv(callList, factor), p.surface)} />
-          {note !== '' && (
-            <Text dimColor size="footnote">
-              {note}
-            </Text>
-          )}
-        </Box>
         <Text key="foot" dimColor size="footnote">
           {isCalibrated
             ? 'Cost is Claude Code’s own total. Each row’s cost is its tokens at list price, scaled so the rows add up to that total.'
             : 'Cost is an estimate at list price until Claude Code reports the session cost.'}{' '}
-          Weighted = input ×1 + cache write ×1.25 (five-minute cache) or ×2 (one-hour cache) + cache read ×0.1 + output ×5. Fresh = input + cache write + output.
+          Cost per request = cost ÷ requests, both from the same transcript read. Weighted = input ×1 + cache write ×1.25 (five-minute cache) or ×2 (one-hour cache) + cache read ×0.1 + output ×5. Fresh = input + cache write + output.
         </Text>
       </Box>
     )

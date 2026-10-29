@@ -79,12 +79,14 @@ export type Check = { at: number; tool: string; bucket: Bucket; verdict: 'allowe
 export type Gate = { totals: Record<Bucket, Tally>; recent: Check[] }
 
 export type Turn = { startedAt: number; edits: number; errors: number; tools: number; costAtStart: number | null }
-export type Receipt = { durationMs: number; agents: number; edits: number; errors: number; tools: number; costDelta: number | null; reason: string }
+// cacheHit: cache read over all input of the turn's requests (main and sub-agents); absent in receipts stored before it.
+export type Receipt = { durationMs: number; agents: number; edits: number; errors: number; tools: number; costDelta: number | null; reason: string; requests?: number; cacheHit?: number | null }
 
 /** The pane's sections in order, and those ticked off; Vitals is always shown and not listed. */
-// hideCacheBar: the Cache Health bar is off the top card; theme: a THEMES id, absent for the app's own colours;
-// targets: the limits the person has set in settings, only those that differ from the defaults.
-export type Layout = { order: string[]; hidden: string[]; hideCacheBar?: boolean; theme?: string; targets?: Partial<Targets> }
+// theme: a THEMES id, absent for the app's own colours; targets: the limits the person has set in the Cache card's menu,
+// only those that differ from the defaults; cards: each card's extras ticked in its own ⚙ menu (card id -> extra -> on),
+// only those that differ from the defaults in core.ts EXTRAS.
+export type Layout = { order: string[]; hidden: string[]; theme?: string; targets?: Partial<Targets>; cards?: Record<string, Record<string, boolean>> }
 /** The limits the bars are coloured by: each set in settings, defaults in core.ts TARGETS. */
 export type Targets = { memGood: number; memFine: number; memBar: number; turnMax: number; ctxWarn: number; ctxBad: number; limWarn: number; limBad: number }
 export type LogLine = { at: number; who: string; text: string; kind: 'info' | 'error' | 'done' }
