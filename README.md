@@ -53,6 +53,23 @@ Click a section's title to open or close it. The top card is always shown. Sessi
 
 Two buttons copy the task summary and the full request log (up to 5,000 requests) as CSV.
 
+### Cache targets
+
+Each row in Settings → **Cache targets** has a − and a + that move it one step. The three memory rows are counted in characters of the memory index. The four percent rows are for two different bars, the context bar and the plan-limit bars, which measure their own percent of a fixed total. So those percents cannot be worked out from the memory rows.
+
+| Row | Default | Step | What − and + change |
+|---|---|---|---|
+| Memory index: good to | 4,200 | 200 | the memory index bar is green up to this many characters |
+| Memory index: fine to | 5,800 | 200 | orange up to this many; red past it |
+| Memory index: bar width | 10,000 | 1,000 | how many characters the full bar stands for. A longer index fills it |
+| Context: orange from % | 65 | 5 | the CONTEXT bar turns orange at this share of the context window |
+| Context: red from % | 85 | 5 | and red at this share |
+| Plan limits: orange from % | 60 | 5 | the 5-hour and 7-day limit bars turn orange at this percent used |
+| Plan limits: red from % | 85 | 5 | and red at this percent |
+| Requests per turn: limit | 15 | 1 | REQUESTS THIS TURN in Cache health turns red past this many |
+
+No row has an upper end. A row goes down to one step at the least, and never below the row it pairs with: good stays under fine, fine stays at or under the bar width, and orange stays under red. Raising the lower row of a pair carries the upper one up with it, and lowering it again brings the upper one back. A value that differs from its default is shown bold. **↺ Back to the defaults** resets every row.
+
 <p align="center">
   <img src="docs/settings.png" alt="The settings panel: section chips to show, hide and reorder sections, the Cache health bar checkbox, and the theme choice" width="400">
   <img src="docs/recent-requests.png" alt="The Recent requests section and the CSV buttons" width="380">

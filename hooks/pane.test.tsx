@@ -478,3 +478,28 @@ test('targets: the settings column steps a limit and the bars use it', async ($,
   await ui.press({ key: 'tg-reset' })
   expect(await ui.find({ key: 'tg-reset' })).toBeUndefined()
 })
+
+// The Vitals stats never land one to a line at a width they fit: on desktop the surface wraps them by its own
+// width, whatever width the first draw reports; in the terminal two halves sit on one line with no gap between.
+for (const bodyColumns of [24, 48, 120])
+  test(`stats: desktop wraps by its own width at ${bodyColumns} columns`, async ($, on) => {
+    mock.clock(on)
+    await start($, on)
+    const ui = await mount($, 'desktop', bodyColumns)
+    const boxes = (await ui.findAll({ type: 'Box' })) as any[]
+    const rows = boxes.filter(b => b.props?.flexDirection === 'row' && b.props?.rowGap === 1 && b.props?.columnGap !== undefined && b.props?.flexWrap !== undefined)
+    expect(rows.length).toBeGreaterThan(0)
+    for (const r of rows) expect([r.props.flexWrap, r.props.justifyContent]).toEqual(['wrap', 'space-between'])
+    expect(boxes.filter(b => b.props?.width === '50%' || b.props?.width === '100%' && b.props?.flexDirection === 'column' && b.props?.flexShrink === 0)).toHaveLength(0)
+  })
+
+test('stats: terminal halves have no gap between them', async ($, on) => {
+  mock.clock(on)
+  await start($, on)
+  const ui = await mount($, 'terminal', 48)
+  const boxes = (await ui.findAll({ type: 'Box' })) as any[]
+  const halves = boxes.filter(b => b.props?.width === '50%')
+  expect(halves.length).toBeGreaterThan(0)
+  const rows = boxes.filter(b => b.props?.flexWrap === 'wrap' && b.props?.columnGap === 0)
+  expect(rows.length).toBeGreaterThan(0)
+})

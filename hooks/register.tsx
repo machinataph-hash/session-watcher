@@ -751,9 +751,11 @@ export const register: Register = on => {
     }
 
     // One row when wide: the columns spread edge to edge, the last one ending at the right edge.
-    // Narrower, they wrap as halves or full rows.
-    const statW = isWide ? undefined : isNarrow ? '100%' : '50%'
-    const stat3 = isNarrow ? '100%' : undefined
+    // Narrower, they wrap as halves (no gap, or two halves do not fit a line) or full rows. Outside the terminal the surface wraps them by its own width,
+    // since the first draw of a desktop pane can report a width narrower than the pane opens to.
+    const flows = e.surface !== 'terminal'
+    const statW = flows || isWide ? undefined : isNarrow ? '100%' : '50%'
+    const stat3 = !flows && isNarrow ? '100%' : undefined
     const stat = (key: string, label: string, value: string, opts: { color?: 'claude' | 'error' | 'warning' | 'success'; sub?: string; w?: string } = {}) => (
       <Box key={key} flexDirection="column" width={opts.w ?? statW} flexShrink={0}>
         {heading('l', label)}
@@ -768,7 +770,7 @@ export const register: Register = on => {
       </Box>
     )
     const stats = (key: string, items: unknown[]) => (
-      <Box key={key} flexDirection="row" flexWrap={isWide ? 'nowrap' : 'wrap'} justifyContent={isWide ? 'space-between' : 'flex-start'} columnGap={2} rowGap={1}>
+      <Box key={key} flexDirection="row" flexWrap={isWide && !flows ? 'nowrap' : 'wrap'} justifyContent={isWide || flows ? 'space-between' : 'flex-start'} columnGap={statW === '50%' ? 0 : 2} rowGap={1}>
         {items as never}
       </Box>
     )
