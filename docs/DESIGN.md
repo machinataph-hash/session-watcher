@@ -6,7 +6,7 @@ tree at desktop widths 30, 60, 120 and 200 and terminal widths 80 and 140, setti
 ## 1. Grid
 1.1 All card content sits one cell in from the card border (`INSET = 1`), on every card.
 1.2 Nested rows (tick lists, the Cards list) sit one indent step further in (`INDENT = 1`). No other indent exists.
-1.3 Columns of a row are separated by one cell; groups and stat columns by two (`COL_GAP = 2`).
+1.3 Table columns are separated by one cell; grid columns (stats, settings groups) by two (`COL_GAP = 2`), everywhere.
 
 ## 2. Card template
 2.1 Title row: disclosure arrow and name on the left; dim summary, then the gear, on the right. The gear is one size on every card.
@@ -32,16 +32,19 @@ tree at desktop widths 30, 60, 120 and 200 and terminal widths 80 and 140, setti
 5.3 Themes repaint only where every control takes the theme's ink (the terminal). A desktop Button keeps the app's ink, so the desktop keeps the app's colours in every theme.
 5.4 Every theme ink is at least 4.5:1 against the theme's card and page background.
 
-## 6. Stat columns
-6.1 Every stat column is 20 cells wide, packed from the left, and wraps to the next line; columns line up across rows and cards.
-6.2 A pane narrower than one column gives each stat the full row.
+## 6. Grids (stat rows and settings groups)
+6.1 Columns span the card wall to wall and are equal: every cell grows from zero (`flexGrow 1`, width 0, `minWidth 0`), so the first column starts on the left inset and the last ends on the right inset.
+6.2 Each stat column needs at least 16 cells, each settings group 24. When all columns do not fit at that minimum the grid becomes 2-up, then 1-up.
+6.3 Every row of a grid has the same column count and widths; a short last row is padded with empty cells, never stretched.
+6.4 When the surface reports no width, the grid hands the reflow to the surface: cells wrap at their minimum width.
 
 ## 7. Tables
-7.1 Permissions, Cache lists, Recent Requests, Activity, Tasks, Sub-Agents and Session Totals tables use fixed column widths: time 5, count 6, tokens 7, percent 5, cost 8.
-7.2 A header cell has the same width and alignment as its column's values.
-7.3 Numbers are right-aligned with tabular figures; text is left-aligned.
-7.4 Only free text (names, descriptions) truncates with an ellipsis, in the one flexible column. Numbers never truncate.
+7.1 Permissions, Recent Requests, Sub-Agents, Tasks and Session Totals each use one column-def list, shared by the header and every row, so a header cell has the same width and alignment as its values.
+7.2 The free-text column (name, label) grows to fill the row; every numeric column is 8 cells wide and right-aligned, header included. Tables span wall to wall.
+7.3 Below the table's minimum width (10 cells of text plus its fixed columns) each row stacks as "label: value" lines instead of squeezing.
+7.4 Only free text truncates with an ellipsis. Numbers never truncate.
 7.5 A table is one block: header and rows with no blank lines between them.
+7.6 Activity and the Cache lists follow the same columns: a fixed time column, a growing text column, a right-aligned 8-cell number.
 
 ## 8. Bars
 8.1 A bar fills the flexible column of its row; its value sits in a fixed numeric column on the right.
@@ -56,14 +59,13 @@ tree at desktop widths 30, 60, 120 and 200 and terminal widths 80 and 140, setti
 10.4 Buttons have one style: the surface's own Button; under a terminal theme, an accent `[ label ]` in the theme's ink.
 
 ## 11. Settings
-11.1 Main's settings groups are 30 cells wide, packed from the left, and wrap; their headings and controls align at every width.
-11.2 A pane narrower than one group stacks the groups at full width.
+11.1 Main's settings groups are a grid (rule 6): equal columns wall to wall, at least 24 cells each, then 2-up, then stacked.
 
 ## 12. Resizing
-12.1 Narrow (under 40 columns): secondary columns (model, calls, cache read, who in Activity) and the task summary drop; stats and settings groups stack.
-12.2 Medium (40 to 99): the core columns show; columns that need room (model, calls, input + write) appear from 54 columns.
-12.3 Wide (100 and over): nothing new appears; the flexible text column and bars take the extra room, and stats and groups fit more per line.
-12.4 Free text truncates; stats, groups and tick lists wrap. Nothing scrolls sideways.
+12.1 Narrow (under 40 columns): grids go 1-up, tables stack as label: value rows, secondary columns drop.
+12.2 Medium (40 to 99): grids take as many equal columns as fit at their minimum; columns that need room (model, calls, input + write) appear from 54 columns.
+12.3 Wide (100 and over): all columns show; grids and tables stretch wall to wall.
+12.4 Free text truncates; grids and tick lists reflow; nothing scrolls sideways.
 
 ## 13. Themes
 13.1 All themes draw the same layout; only colours change.
