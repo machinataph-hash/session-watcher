@@ -36,6 +36,7 @@ tree at desktop widths 30, 60, 120 and 200 and terminal widths 80 and 140, setti
 6.1 Columns span the card wall to wall and are equal: every cell grows from zero (`flexGrow 1`, width 0, `minWidth 0`), so the first column starts on the left inset and the last ends on the right inset.
 6.2 Each stat column needs at least 16 cells, each settings group 24. When all columns do not fit at that minimum the grid becomes 2-up, then 1-up.
 6.3 Every row of a grid has the same column count and widths; a short last row is padded with empty cells, never stretched.
+6.4 All grids in one card share one column count (the card's widest row), so column edges line up from row to row; a shorter row is padded with empty cells.
 6.4 When the surface reports no width, the grid hands the reflow to the surface: cells wrap at their minimum width.
 
 ## 7. Tables

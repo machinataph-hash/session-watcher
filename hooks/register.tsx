@@ -939,16 +939,19 @@ export const register: Register = on => {
     const gridCell = (key: string, node: unknown, min?: number) => (
       <Box key={key} flexDirection="column" flexGrow={1} flexShrink={1} width={min ?? 0} minWidth={min ?? 0}>{node as never}</Box>
     )
-    const grid = (key: string, items0: unknown[], min: number, width = inner) => {
+    // `cols` is the card's column count: every grid in one card passes the same one, so rows of different
+    // lengths still share column edges (a short row is padded with empty cells, never stretched).
+    const grid = (key: string, items0: unknown[], min: number, width = inner, cols?: number) => {
       const items = items0.filter(Boolean)
+      const target = Math.max(cols ?? items.length, items.length)
       if (!knownW)
         return (
           <Box key={key} flexDirection="row" flexWrap="wrap" columnGap={COL_GAP} rowGap={1}>
-            {items.map((it, i) => gridCell(`g${i}`, it, min))}
+            {[...items, ...Array(target - items.length).fill(null)].map((it, i) => gridCell(`g${i}`, it, min))}
           </Box>
         )
       const fits = (n: number) => n * min + (n - 1) * COL_GAP <= width
-      const per = [items.length, 2, 1].find(n => n <= items.length && fits(n)) ?? 1
+      const per = [target, 2, 1].find(n => n <= target && fits(n)) ?? 1
       const rows: unknown[][] = []
       for (let i = 0; i < items.length; i += per) rows.push(items.slice(i, i + per))
       return (
@@ -974,7 +977,7 @@ export const register: Register = on => {
         ) : null}
       </Box>
     )
-    const stats = (key: string, items: unknown[]) => grid(key, items, STAT_MIN)
+    const stats = (key: string, items: unknown[], cols?: number) => grid(key, items, STAT_MIN, inner, cols)
 
     // A transcript read has landed (its time may be 0 under a test clock; its models are what count).
     const hasScan = sc.at > 0 || Object.keys(sc.byModel).length > 0
@@ -1243,12 +1246,12 @@ export const register: Register = on => {
       hasScan && stats('s', [
         stat('m', 'MAIN THREAD', usd(mainCost), { sub: `${perReq(mainCost, mainU.calls)} / request` }),
         stat('a', 'SUB-AGENTS', usd(agentCost), { sub: `${perReq(agentCost, agentU.calls)} / request` }),
-      ]),
+      ], 3),
       sessEx.tokens && stats('tk', [
         stat('f', 'FRESH', k(fresh(total)), { sub: 'input + write + output' }),
         stat('r', 'CACHE READ', k(total.cacheRead)),
         stat('w', 'WEIGHTED', k(weighted(total)), { sub: 'tokens by price' }),
-      ]),
+      ], 3),
       kinds('kinds', total, inner, sessEx.tokens, hasScan ? snapCost : undefined),
       byModel.length > 0 && table('who', [
         { id: 'sw', label: '', kind: 'mark', w: 1 },
