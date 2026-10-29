@@ -39,7 +39,7 @@ It needs `python3` on your PATH for the session totals and active time. Mods are
 | `/session-watcher reset` | put every section back to its starting open or closed state |
 | `/session-watcher report` | publish the live page now |
 | `/session-watcher live on` / `off` | turn the live page on or off (on by default) |
-| `/session-watcher live 20` | publish at most every 20 seconds (the default; 5 at the least) |
+| `/session-watcher live 10` | publish at most every 10 seconds (the default; 5 at the least) |
 
 Click a section's title to open or close it. The top card is always shown. Session Totals and Tasks start open, and the rest start closed, so you choose what you see. The pane opens by itself when a session starts.
 
@@ -108,7 +108,7 @@ A second tool, `context_breakdown`, returns the context window broken down as `/
 
 ## Live page
 
-Session Watcher also publishes the pane as a private page on claude.ai, so you can follow a session where the pane can't be drawn, such as a cloud session in the desktop app. After each model request it writes its state into [`report/page.html`](report/page.html) and publishes it with the Artifact tool, at most once every 20 seconds; requests inside that wait are published when it ends, so the page never stays behind. The first publish puts the link in Activity and in a toast; later ones update the same page, and an open page picks up the update by itself.
+Session Watcher also publishes the pane as a private page on claude.ai, so you can follow a session where the pane can't be drawn, such as a cloud session in the desktop app. After each model request it writes its state into [`report/page.html`](report/page.html) and publishes it with the Artifact tool, at most once every 10 seconds; requests inside that wait are published when it ends, so the page never stays behind. The first publish puts the link in Activity and in a toast; later ones update the same page, and an open page picks up the update by itself.
 
 A publish is a tool call the mod makes itself, not a model request, so it costs no tokens. The page shows the same cards as the pane, drawn to [docs/DESIGN.md](docs/DESIGN.md), with the pane's own numbers: cost, context, rate limits, permissions and sub-agents. Which cards are open, their extras and the theme are kept in your browser. The page is private until you share it, and its Activity and Permissions cards show your prompts and commands.
 

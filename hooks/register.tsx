@@ -248,7 +248,7 @@ const callsCsv = (list: Call[], factor: number) =>
 // inside that wait is published when it ends, so the page always catches up with the last one.
 type LiveCfg = { on: boolean; everyS: number }
 const LIVE = 'live'
-const LIVE_DEFAULT: LiveCfg = { on: true, everyS: 20 }
+const LIVE_DEFAULT: LiveCfg = { on: true, everyS: 10 }
 const live = { cfg: LIVE_DEFAULT, last: 0, timer: null as { cancel: () => void } | null, isBusy: false, isDirty: false, path: '', url: '' }
 const isLiveCall = (tool: string, input: unknown) => tool === 'Artifact' && live.path !== '' && (input as { file_path?: unknown } | null)?.file_path === live.path
 

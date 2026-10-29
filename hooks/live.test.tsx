@@ -49,13 +49,13 @@ test('live page: a request publishes the state, later ones wait for the interval
   // The page holds the state: the request just made.
   const state = JSON.parse(/>(.*)<\/script>/.exec(h.files.get(path) ?? '')![1]!)
   expect(state.calls.length).toBe(1)
-  // Two more requests within 20 seconds: nothing yet; once the 20 seconds are up, one publish with both.
+  // Two more requests within 10 seconds: nothing yet; once the 10 seconds are up, one publish with both.
   await clock.advance(5_000)
   await step($)
   await step($)
   await settle(clock)
   expect(h.published.length).toBe(1)
-  await clock.advance(15_000)
+  await clock.advance(5_000)
   await settle(clock)
   expect(h.published.length).toBe(2)
   expect(h.published[1]!.icon).toBeUndefined()
