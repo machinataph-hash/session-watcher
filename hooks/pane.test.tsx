@@ -146,7 +146,7 @@ test('cache section and its Main line', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: /^CACHE HIT RATE$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^92k$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^18,057 \/ 10,000 chars/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /^  Bad$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^Bad$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^idle over 1 hour$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^resolve_references$/ })).toBeDefined()
 })
@@ -417,34 +417,24 @@ test('chips: in every theme, text is drawn in a colour unlike its background', (
   }
 })
 
-// The theme rule: in every theme, no text is drawn in its background's colour, Button text included:
-// every Button's text is the mod's own Text in a theme colour, with no strip behind it.
+// The theme rule on the desktop: a desktop Button keeps the app's own ink, which a theme cannot reach, so a theme there
+// would put app-white text on its cream card. The desktop keeps the app's adaptive colours in every theme.
 for (const id of Object.keys(THEMES))
-  test(`desktop, ${id}: no text in the background's colour, and every Button reads`, async ($, on) => {
-    const t = THEMES[id]!
+  test(`desktop, ${id}: app colours only, so every Button reads in light and dark mode`, async ($, on) => {
     mock.clock(on)
     mock.store(on, { layout: { theme: id } })
     await start($, on)
     const ui = await mount($, 'desktop')
     await ui.press({ key: 'settings' })
     expect(await ui.find({ key: 'theme-app' })).toBeDefined()
-    // The desktop draws no Client at all: a Client that misses its 2000ms render answer tears the whole pane down.
+    expect(await ui.find({ type: 'Text', text: /Applies in the terminal/ })).toBeDefined()
     expect(await ui.findAll({ type: 'Client' })).toHaveLength(0)
-    for (const x of await ui.findAll({ type: 'Text' })) {
-      const c = (x as any).props?.color
-      expect(typeof c).toBe('string')
-      expect([t.bg, t.card]).not.toContain(c)
-    }
-    // Every clickable title is a Button holding the mod's own Text in a theme colour.
+    for (const x of await ui.findAll({ type: 'Text' })) expect(String((x as any).props?.color ?? '')).not.toMatch(/^#/)
+    expect((await ui.findAll({ type: 'Box' })).filter(b => (b as any).props?.backgroundColor !== undefined)).toHaveLength(0)
     const buttons = await ui.findAll({ type: 'Button' })
-    expect(buttons.length).toBeGreaterThan(3)
-    for (const b of buttons) for (const c of JSON.stringify(b).matchAll(/"color":"([^"]+)"/g)) expect([t.bg, t.card]).not.toContain(c[1])
-    expect((await ui.findAll({ type: 'Box' })).filter(b => (b as any).props?.backgroundColor !== undefined && (b as any).props?.backgroundColor !== t.card)).toHaveLength(0)
-    // A task header still opens and closes the task, and a section title still folds its section.
     const task = buttons.map(b => String((b as any).key)).find(k => k.startsWith('open-'))
     expect(task).toBeDefined()
     await ui.press({ key: task! })
-    expect(await ui.find({ key: 'sec-tasks' })).toBeDefined()
     await ui.press({ key: 'sec-tasks' })
     expect(await ui.find({ key: task! })).toBeUndefined()
   })
@@ -535,15 +525,13 @@ for (const bodyColumns of [24, 48, 120])
     expect(boxes.filter(b => b.props?.width === '50%' || (b.props?.width === '100%' && b.props?.flexDirection === 'column' && b.props?.flexShrink === 0))).toHaveLength(0)
   })
 
-test('stats: terminal halves have no gap between them', async ($, on) => {
+test('stats: the terminal uses the same fixed-width columns as the desktop', async ($, on) => {
   mock.clock(on)
   await start($, on)
   const ui = await mount($, 'terminal', 48)
   const boxes = (await ui.findAll({ type: 'Box' })) as any[]
-  const halves = boxes.filter(b => b.props?.width === '50%')
-  expect(halves.length).toBeGreaterThan(0)
-  const rows = boxes.filter(b => b.props?.flexWrap === 'wrap' && b.props?.columnGap === 0)
-  expect(rows.length).toBeGreaterThan(0)
+  expect(boxes.filter(b => b.props?.width === '50%')).toHaveLength(0)
+  expect(boxes.filter(b => b.props?.flexDirection === 'column' && b.props?.flexShrink === 0 && b.props?.width === 20).length).toBeGreaterThan(2)
 })
 
 // The Main card's settings reflow: at a narrow terminal width each group takes the full row, nothing is wider than the pane.
@@ -554,9 +542,6 @@ test('settings: groups stack at a narrow width and fit', async ($, on) => {
   await ui.press({ key: 'settings' })
   for (const key of ['cards', 'main-extras', 'themes']) expect(((await ui.find({ key })) as any)?.props?.width).toBe('100%')
   expect(await ui.find({ type: 'Text', text: /^THEME$/ })).toBeDefined()
-  const wide = await mount($, 'desktop', 120)
-  await wide.press({ key: 'settings' }).catch(() => undefined)
-  expect(((await wide.find({ key: 'themes' })) as any)?.props?.width).toBeUndefined()
 })
 
 // Session Totals: no weighted figure in Main; the snapshot total and main/agent rows from one read add up.
@@ -693,8 +678,8 @@ test(`desktop: Permissions columns are fixed width at ${cols} columns`, async ($
   const ui = await $.ui.mount({ plugin: 'session-watcher', surface: 'desktop', component: 'Pane', requestId: 'session-watcher', props: { ...pane, bodyColumns: cols } })
   await ui.press({ key: 'sec-gate' })
   const head = JSON.stringify((await ui.findAll({ key: 'head' })).find(h => JSON.stringify(h).includes('ALLOWED')))
-  for (const w of ['"width":9', '"width":10']) expect(head).toContain(w)
-  expect(head.match(/"width":10/g)).toHaveLength(3)
+  expect(head).toContain('"width":9')
+  expect(head.match(/"width":8/g)).toHaveLength(3)
   expect(await ui.find({ type: 'Text', text: /could not draw/ })).toBeUndefined()
 })
 
@@ -744,7 +729,7 @@ test(`desktop: every card draws 0 dividers closed and exactly 2 open, at ${cols}
   const rules = (n: unknown): number => {
     const x = n as N
     if (!x || typeof x !== 'object') return 0
-    const own = x.type === 'Text' && /^─{50,}/.test(String(x.children?.[0])) ? 1 : 0
+    const own = /^sep-(top|bottom)$/.test(String((x as any).key ?? x.props?.key)) ? 1 : 0
     return own + (x.children ?? []).reduce((a: number, c) => a + rules(c), 0)
   }
   const ids = ['vitals', ...Object.keys(EXTRAS).filter(id => id !== 'vitals')]

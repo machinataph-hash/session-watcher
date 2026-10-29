@@ -108,7 +108,18 @@ const pressActions = new Map<string, () => void>()
 const buttonActions = new Map<string, (p: never) => void>()
 // Every card, outer section or inner (a task, a sub-agent), is drawn alike: sections can be moved, so
 // no card may look like a special first one. The current task is marked by its "now" tag, not its border.
-const CARD = { flexDirection: 'column', borderStyle: 'single', borderColor: 'inactive', borderDimColor: true, paddingX: 1 } as const
+// The grid (docs/DESIGN.md): one inset for all card content, one indent step for nested rows, one gap between columns.
+const INSET = 1
+const INDENT = 1
+const COL_GAP = 2
+// Fixed widths: the arrow column of list rows, a stat column, a settings group, and the table's numeric columns.
+const ARROW_W = 3
+const STAT_W = 20
+const GROUP_W = 30
+const COLW = { time: 5, count: 6, tokens: 7, pct: 5, cost: 8 } as const
+// Between a tick and its label, on every tick list.
+const TICK_GAP = '  '
+const CARD = { flexDirection: 'column', borderStyle: 'single', borderColor: 'inactive', borderDimColor: true, paddingX: INSET } as const
 // Tasks whose open state differs from their default (the current task starts open, earlier ones closed).
 const taskToggles = atom({ plugin: 'session-watcher', key: 'taskToggles' } as const, [] as number[])
 const copied = atom({ plugin: 'session-watcher', key: 'copied' } as const, '')
@@ -624,12 +635,22 @@ export const register: Register = on => {
     // Inside a section: its border and one cell of padding on each side.
     const inner = cols - 4
     const isWide = inner >= 50
-    const isNarrow = inner < 38
+    const isNarrow = cols < 40
 
     const heading = (key: string, text: string) => (
       <Text key={key} bold dimColor wrap="truncate-end">
         {text}
       </Text>
+    )
+    // A label/value row (DESIGN 9): heading left; a dim note then the value right, one style on every card.
+    const labelValue = (key: string, label: string, note: string, value?: { text: string; color?: BarColor }) => (
+      <Box key={key} flexDirection="row" gap={1} justifyContent="space-between">
+        <Box flexShrink={1} minWidth={0}>{heading('l', label)}</Box>
+        <Box key="v" flexDirection="row" gap={1} flexShrink={0}>
+          {note !== '' && <Text key="n" tabular dimColor>{note}</Text>}
+          {value && <Text key="v" tabular bold color={value.color}>{value.text}</Text>}
+        </Box>
+      </Box>
     )
     const cell = (key: string, w: number, node: unknown, right = true) => (
       <Box key={key} width={w} flexShrink={0} justifyContent={right ? 'flex-end' : 'flex-start'}>
@@ -643,7 +664,11 @@ export const register: Register = on => {
     )
 
     type BarColor = 'claude' | 'suggestion' | 'success' | 'warning' | 'error' | 'text' | 'merged' | 'bashBorder' | 'planMode' | 'inactive' | 'permission'
-    const theme = lay.theme ? THEMES[lay.theme] : undefined
+    // A theme repaints only where every control can take its ink: surfaces with Clients (the terminal). A desktop
+    // Button keeps the app's own ink, so a themed background there left white text on cream; the desktop keeps the
+    // app's adaptive colours, which meet contrast in its light and dark modes.
+    const canTheme = e.surface !== 'desktop' && 'Client' in ui
+    const theme = lay.theme && canTheme ? THEMES[lay.theme] : undefined
     const HEX: Record<BarColor, string> = {
       claude: '#d4683f', suggestion: '#4f8fe0', success: '#2fa84f', warning: '#e09b2d', error: '#d64545',
       text: '#6b6b6b', merged: '#8e5bd6', bashBorder: '#e0569f', planMode: '#23968a', inactive: '#a8a8a8', permission: '#7c83f2',
@@ -744,6 +769,8 @@ export const register: Register = on => {
     // w: drawn in the monospaced face take the same room.
     // A tick box: the same character both ways (its size cannot differ); on is bold and bright, off dim.
     const tickRun = (isOn: boolean): R => ({ text: '■', color: isOn ? 'claude' : undefined, dim: !isOn, bold: isOn, w: 1 })
+    // The disclosure arrow: one glyph width in both states.
+    const arrowRun = (isOn: boolean): R => ({ text: isOn ? '▾ ' : '▸ ', dim: true })
     type R = { text: string; color?: string; dim?: boolean; bold?: boolean; size?: string; w?: number }
     // A clickable title. With no theme, the surface's own Button. Under a theme on a surface with Clients (not desktop),
     // its own one-line surface in the theme's colours, since a desktop Button keeps the app's ink.
@@ -771,6 +798,9 @@ export const register: Register = on => {
       buttonActions.set(key, f)
       return f
     }
+    // One button style (DESIGN 10.4): the surface's own Button; under a theme, a themed pressable so it takes the theme's ink.
+    const action = (key: string, label: string, f: (p?: Parameters<PressFn>[0]) => void) =>
+      theme && Client ? pressable(key, [{ text: `[ ${label} ]`, color: 'claude', bold: true }], () => f()) : <Button key={key} label={label} onPress={keep(key, p => f(p))} />
     const setLayout = (msg: unknown) => void saveLayout($, msg).catch(() => undefined)
     const palette = theme ? { palette: { bg: theme.card, fg: theme.fg, muted: theme.muted, accent: theme.keys.claude ?? theme.fg } } : {}
     // The cog that opens a card's own menu: full ink, accent while open.
@@ -782,21 +812,27 @@ export const register: Register = on => {
       return Client ? (
         <Client key={`${CARD_TICKS}${card}`} module="./chips.tsx" props={{ isFixed: true, items: defs.map(d => ({ id: d.key, title: d.label, isShown: ex[d.key] ?? d.isOn })), ...palette }} height={defs.length} />
       ) : (
-        <Box key={`ticks-${card}`} flexDirection="column" paddingLeft={1}>
+        <Box key={`ticks-${card}`} flexDirection="column" paddingLeft={INDENT}>
           {defs.map(d => {
             const isOn = ex[d.key] ?? d.isOn
-            return pressable(`x-${card}-${d.key}`, [tickRun(isOn), { text: `  ${d.label}`, dim: !isOn }], () => setLayout({ extra: { card, key: d.key } }))
+            return pressable(`x-${card}-${d.key}`, [tickRun(isOn), { text: `${TICK_GAP}${d.label}`, dim: !isOn }], () => setLayout({ extra: { card, key: d.key } }))
           })}
         </Box>
       )
     }
-    // A thin rule across the card: one line of dashes longer than any pane, cut at the edge. It must truncate, not wrap:
-    // the desktop does not clip a wrapped text to its box height, so a wrapping rule drew as two lines on some widths.
-    const rule = (key: string) => (
-      <Box key={key} height={1} overflow="hidden">
-        <Text dimColor wrap="truncate-end">{'─'.repeat(Math.max(inner, 600))}</Text>
-      </Box>
-    )
+    // The divider (DESIGN 2.4): one clean line edge to edge. Where the surface draws SVG (desktop) a 1px line stretched
+    // to the row, as the bars are; the terminal counts cells exactly, so exactly `inner` box-drawing cells. Never a
+    // truncated text, which a proportional surface ends with an ellipsis.
+    const rule = (key: string) =>
+      Svg ? (
+        <Box key={key} height={1} alignItems="center" flexGrow={1} minWidth={0} overflow="hidden">
+          <Svg source={`<svg xmlns="http://www.w3.org/2000/svg" width="4000" height="1" viewBox="0 0 1000 1" preserveAspectRatio="none"><rect width="1000" height="1" fill="#8a8a8a" fill-opacity="0.45"/></svg>`} alt="divider" height={1} />
+        </Box>
+      ) : (
+        <Box key={key} height={1}>
+          <Text dimColor>{'─'.repeat(inner)}</Text>
+        </Box>
+      )
 
     // THE CARD TEMPLATE. Every card, Main included, is drawn here, so none can differ:
     //  - title row: arrow and name left; summary and the ⚙ (one size on every card) right.
@@ -835,7 +871,7 @@ export const register: Register = on => {
     const section = (id: string, title: string, summary: string, body: () => unknown, more?: () => unknown) => {
       const hasMenu = (EXTRAS[id] ?? []).length > 0 || more !== undefined
       return card(id, {
-        title: pressable(`sec-${id}`, [{ text: isOpen(id) ? '▾ ' : '▸ ', dim: true }, { text: title, bold: true }], () => void flip(id)),
+        title: pressable(`sec-${id}`, [arrowRun(isOpen(id)), { text: title, bold: true }], () => void flip(id)),
         summary,
         cogKey: hasMenu ? `cfg-${id}` : undefined,
         onCog: () => void flip(`${MENU}${id}`),
@@ -853,10 +889,10 @@ export const register: Register = on => {
     // In the terminal, one row when wide with the columns spread edge to edge; narrower, halves or full rows.
     // Outside the terminal every column is one fixed width, packed from the left and wrapped by the surface,
     // so columns line up across rows and cards at every pane width instead of spreading apart.
-    const flows = e.surface !== 'terminal'
-    const STAT_COL = 20
-    const statW = flows ? STAT_COL : isWide ? undefined : isNarrow ? '100%' : '50%'
-    const stat3 = flows ? STAT_COL : isNarrow ? '100%' : undefined
+    // DESIGN 6: every stat column is STAT_W wide on every surface, packed from the left and wrapped, so columns line
+    // up across rows and cards; only a pane narrower than one column gives it the full row.
+    const statW: number | string = inner < STAT_W ? '100%' : STAT_W
+    const stat3 = statW
     const stat = (key: string, label: string, value: string, opts: { color?: 'claude' | 'error' | 'warning' | 'success'; sub?: string; w?: string | number } = {}) => (
       <Box key={key} flexDirection="column" width={opts.w ?? statW} flexShrink={0}>
         {heading('l', label)}
@@ -871,7 +907,7 @@ export const register: Register = on => {
       </Box>
     )
     const stats = (key: string, items: unknown[]) => (
-      <Box key={key} flexDirection="row" flexWrap={isWide && !flows ? 'nowrap' : 'wrap'} justifyContent={isWide && !flows ? 'space-between' : 'flex-start'} columnGap={statW === '50%' ? 0 : 2} rowGap={1}>
+      <Box key={key} flexDirection="row" flexWrap="wrap" justifyContent="flex-start" columnGap={COL_GAP} rowGap={1}>
         {items as never}
       </Box>
     )
@@ -935,8 +971,8 @@ export const register: Register = on => {
     ) : (
       <Box key="chips" flexDirection="column">
         {chipItems.map((it, i) => (
-          <Box key={it.id} flexDirection="row" paddingLeft={1}>
-            <Box key="up" width={3} flexShrink={0}>
+          <Box key={it.id} flexDirection="row" paddingLeft={INDENT}>
+            <Box key="up" width={ARROW_W} flexShrink={0}>
               {i > 0 ? (
                 <Button key={`up-${it.id}`} plain onPress={keep('up-' + it.id, () => setLayout({ move: { id: it.id, to: i - 1 } }))}>
                   <Text dimColor>↑</Text>
@@ -947,7 +983,7 @@ export const register: Register = on => {
             </Box>
             <Button key={`chip-${it.id}`} plain onPress={keep('chip-' + it.id, () => setLayout({ toggle: it.id }))}>
               <Text color={it.isShown ? 'claude' : undefined} dimColor={!it.isShown} bold={it.isShown} mono>■</Text>
-              <Text dimColor={!it.isShown}>{`  ${it.title}`}</Text>
+              <Text dimColor={!it.isShown}>{`${TICK_GAP}${it.title}`}</Text>
             </Button>
           </Box>
         ))}
@@ -990,11 +1026,13 @@ export const register: Register = on => {
     )
     // One group of the settings: a label and a one-line note that wrap, then its controls. Below 60 columns in the
     // terminal each group takes the full row; wider (and on surfaces that wrap by their own width) they share rows.
-    const isStacked = inner < 56
+    // DESIGN 11: settings groups are GROUP_W wide, packed from the left and wrapped, so they align at every width;
+    // a pane narrower than one group gives each the full row.
+    const isStacked = inner < GROUP_W
     const group = (key: string, label: string, note: string, body: unknown) => (
-      <Box key={key} flexDirection="column" gap={1} width={isStacked ? '100%' : '48%'} flexGrow={0} flexShrink={0}>
+      <Box key={key} flexDirection="column" gap={1} width={isStacked ? '100%' : GROUP_W} flexGrow={0} flexShrink={0}>
         <Box key="h" flexDirection="column">
-          <Text bold dimColor wrap="wrap">{label}</Text>
+          {heading('l', label)}
           <Text size="footnote" dimColor wrap="wrap">{note}</Text>
         </Box>
         {body as never}
@@ -1002,8 +1040,8 @@ export const register: Register = on => {
     )
     const vitalsCard = card('vitals', {
       title: pressable('sec-vitals', [
-        { text: '● ', color: v.isRunning ? 'claude' : 'success', bold: true, size: 'heading' },
-        { text: v.model ? modelName(v.model) : 'Session', bold: true, size: 'heading' },
+        { text: '● ', color: v.isRunning ? 'claude' : 'success', bold: true },
+        { text: v.model ? modelName(v.model) : 'Session', bold: true },
         ...(v.effort ? [{ text: ` · ${v.effort}`, dim: true }] : []),
         ...(v.mode ? [{ text: ` · ${v.mode}`, dim: true }] : []),
       ], () => void flip(VITALS_FOLDED)),
@@ -1013,24 +1051,24 @@ export const register: Register = on => {
       isMenuOpen: settingsOpen,
       items: [
             <Box key="all" flexDirection="row">
-              <Button key="toggle-all" label={allOpen ? 'Collapse all' : 'Open all'} onPress={keep('toggle-all', () => void toggleAll())} />
+              {action('toggle-all', allOpen ? 'Collapse all' : 'Open all', () => void toggleAll())}
             </Box>,
             // Labelled groups, each a fixed share of the row: two side by side when wide, stacked when narrow.
-            <Box key="cols" flexDirection="row" flexWrap="wrap" columnGap={2} rowGap={1}>
+            <Box key="cols" flexDirection="row" flexWrap="wrap" justifyContent="flex-start" columnGap={COL_GAP} rowGap={1}>
               {group('cards', 'CARDS', 'Tick to show, drag to move. Each card has its own ⚙ for its extras.', chips)}
               {group('main-extras', 'MAIN CARD', 'Extras shown in this card.', extraTicks('vitals'))}
               {group('sample', 'SAMPLE DATA', 'Fill empty cards with labelled sample values.', (
-                <Box key="sample-list" flexDirection="column" paddingLeft={1}>
-                  {pressable('sample-data', [tickRun(isSample), { text: '  Sample data', dim: !isSample }], () => setLayout({ sample: true }))}
+                <Box key="sample-list" flexDirection="column" paddingLeft={INDENT}>
+                  {pressable('sample-data', [tickRun(isSample), { text: `${TICK_GAP}Sample data`, dim: !isSample }], () => setLayout({ sample: true }))}
                 </Box>
               ))}
-              {group('themes', 'THEME', 'Colours for the whole pane.', Client ? (
+              {group('themes', 'THEME', canTheme ? 'Colours for the whole pane.' : 'Applies in the terminal. The desktop keeps the app colours, so text stays readable in light and dark mode.', Client ? (
                 <Client key={`${TICKS}-theme`} module="./chips.tsx" props={{ isFixed: true, items: themeChoices.map(o => ({ id: `theme:${o.id}`, title: o.name, isShown: (lay.theme ?? 'app') === o.id })), ...palette }} height={themeChoices.length} />
               ) : (
-                <Box key="theme-list" flexDirection="column" paddingLeft={1}>
+                <Box key="theme-list" flexDirection="column" paddingLeft={INDENT}>
                   {themeChoices.map(o => {
                     const isOn = (lay.theme ?? 'app') === o.id
-                    return pressable(`theme-${o.id}`, [tickRun(isOn), { text: ` ${o.name}`, bold: isOn, dim: !isOn }], () => setLayout({ theme: o.id === 'app' ? null : o.id }))
+                    return pressable(`theme-${o.id}`, [tickRun(isOn), { text: `${TICK_GAP}${o.name}`, dim: !isOn }], () => setLayout({ theme: o.id === 'app' ? null : o.id }))
                   })}
                 </Box>
               ))}
@@ -1040,13 +1078,7 @@ export const register: Register = on => {
       body: () => (
         <Box key="main-body" flexDirection="column" gap={1}>
         <Box key="ctx" flexDirection="column">
-          <Box key="h" flexDirection="row" justifyContent="space-between">
-            {heading('l', `CONTEXT${v.compactions > 0 ? ` · ⟲ ${v.compactions} compacted` : ''}`)}
-            <Text tabular dimColor>
-              {v.ctxTokens !== null ? `${k(v.ctxTokens)} / ${k(ctxMax)}` : '—'}
-              {ctxPct !== null ? <Text color={ctxColor} bold>{`  ${ctxPct}%`}</Text> : ''}
-            </Text>
-          </Box>
+          {labelValue('h', `CONTEXT${v.compactions > 0 ? ` · ⟲ ${v.compactions} compacted` : ''}`, v.ctxTokens !== null ? `${k(v.ctxTokens)} / ${k(ctxMax)}` : '—', ctxPct !== null ? { text: `${ctxPct}%`, color: ctxColor } : undefined)}
           {barRow('bar', [{ value: (ctxPct ?? 0) / 100, color: ctxColor }], inner)}
         </Box>
         {vitalsOpen && stats('s1', [
@@ -1093,22 +1125,16 @@ export const register: Register = on => {
       // Cost leads: the bar and COST are the kind's share of the cost (split by list price); after a thin line, its tokens and their share.
       // The token side (line, TOKENS, %) shows whole or not at all, so the bar keeps at least 10 cells.
       const hasTokens = withTokens && room >= 44
-      const costW = dollars !== undefined ? 7 : 5
-      const barW = room - KIND_W - 1 - (costW + 1) - (hasTokens ? 2 + 8 + 6 : 0)
-      const line = (k: string) => (
-        <Box key={k} width={1} flexShrink={0}>
-          <Text dimColor>│</Text>
-        </Box>
-      )
+      const costW = COLW.cost
+      const barW = room - KIND_W - 1 - (costW + 1) - (hasTokens ? COLW.tokens + 1 + COLW.pct + 1 : 0)
       return (
         <Box key={key} flexDirection="column">
           <Box key="head" flexDirection="row" gap={1}>
             <Box width={KIND_W} flexShrink={0}>{heading('k', 'KIND')}</Box>
             <Box flexGrow={1} flexShrink={1} minWidth={0}>{heading('b', barW >= 16 ? 'SHARE OF COST' : 'SHARE')}</Box>
             {cell('c', costW, heading('c', 'COST'))}
-            {hasTokens && line('l')}
-            {hasTokens && cell('t', 7, heading('t', 'TOKENS'))}
-            {hasTokens && cell('p', 5, heading('p', '%'))}
+            {hasTokens && cell('t', COLW.tokens, heading('t', 'TOKENS'))}
+            {hasTokens && cell('p', COLW.pct, heading('p', '%'))}
           </Box>
           {KINDS.map(kd => {
             const share = tokens > 0 ? u[kd.field] / tokens : 0
@@ -1122,9 +1148,8 @@ export const register: Register = on => {
                   {strip('bar', [{ value: costShare, color: kd.color }], { track: true, cells: barW })}
                 </Box>
                 {cell('c', costW, n(dollars !== undefined ? usd(dollars * costShare) : `${Math.round(100 * costShare)}%`, { bold: true }))}
-                {hasTokens && line('l')}
-                {hasTokens && cell('t', 7, n(k(u[kd.field]), { dim: true }))}
-                {hasTokens && cell('p', 5, n(`${Math.round(100 * share)}%`, { dim: true }))}
+                {hasTokens && cell('t', COLW.tokens, n(k(u[kd.field]), { dim: true }))}
+                {hasTokens && cell('p', COLW.pct, n(`${Math.round(100 * share)}%`, { dim: true }))}
               </Box>
             )
           })}
@@ -1150,13 +1175,7 @@ export const register: Register = on => {
     )
     const sessionBody = () => [
       // The total every row below adds up to: the snapshot's cost, marked while the live cost has moved past it.
-      <Box key="tot" flexDirection="row" justifyContent="space-between">
-        {heading('l', `TOTAL AT ${hasScan ? hhmm(sc.at) : '—'}${isUpdating ? ' · UPDATING' : ''}`)}
-        <Box key="tv" flexDirection="row" gap={1} alignItems="center">
-          {isLagging && hasScan && <Text dimColor size="footnote">{`as of ${hhmm(sc.at)}`}</Text>}
-          {n(usd(snapCost), { bold: true, color: 'claude' })}
-        </Box>
-      </Box>,
+      labelValue('tot', `TOTAL AT ${hasScan ? hhmm(sc.at) : '—'}${isUpdating ? ' · UPDATING' : ''}`, isLagging && hasScan ? `as of ${hhmm(sc.at)}` : '', { text: usd(snapCost), color: 'claude' }),
       hasScan && stats('s', [
         stat('m', 'MAIN THREAD', usd(mainCost), { sub: `${perReq(mainCost, mainU.calls)} / request` }),
         stat('a', 'SUB-AGENTS', usd(agentCost), { sub: `${perReq(agentCost, agentU.calls)} / request` }),
@@ -1172,10 +1191,10 @@ export const register: Register = on => {
           <Box key="head" flexDirection="row" gap={1}>
             <Box width={1} flexShrink={0} />
             <Box flexGrow={1} flexShrink={1} minWidth={0}>{heading('w', 'WHO · MODEL')}</Box>
-            {isWide && cell('c', 6, heading('c', 'CALLS'))}
-            {cell('o', 7, heading('o', 'OUTPUT'))}
-            {sessEx.tokens && cell('w', 7, heading('w', 'WEIGHT'))}
-            {cell('u', 8, heading('u', 'COST'))}
+            {isWide && cell('c', COLW.count, heading('c', 'CALLS'))}
+            {cell('o', COLW.tokens, heading('o', 'OUTPUT'))}
+            {sessEx.tokens && cell('w', COLW.tokens, heading('w', 'WEIGHT'))}
+            {cell('u', COLW.cost, heading('u', 'COST'))}
           </Box>
           {byModel.map(r => (
             <Box key={r.id} flexDirection="row" gap={1}>
@@ -1188,10 +1207,10 @@ export const register: Register = on => {
                   <Text dimColor>{` · ${modelName(r.model)}`}</Text>
                 </Text>
               </Box>
-              {isWide && cell('c', 6, n(String(r.u.calls), { dim: true }))}
-              {cell('o', 7, n(k(r.u.output)))}
-              {sessEx.tokens && cell('w', 7, n(`${Math.round((100 * weighted(r.u)) / (weighted(total) || 1))}%`, { dim: true }))}
-              {cell('u', 8, n(usd(r.u.usd * factor), { bold: true }))}
+              {isWide && cell('c', COLW.count, n(String(r.u.calls), { dim: true }))}
+              {cell('o', COLW.tokens, n(k(r.u.output)))}
+              {sessEx.tokens && cell('w', COLW.tokens, n(`${Math.round((100 * weighted(r.u)) / (weighted(total) || 1))}%`, { dim: true }))}
+              {cell('u', COLW.cost, n(usd(r.u.usd * factor), { bold: true }))}
             </Box>
           ))}
           {splitRow(byModel.map(r => ({ value: r.u.usd, color: r.color })), inner)}
@@ -1202,8 +1221,8 @@ export const register: Register = on => {
       </Text>,
       sessEx.csv && (
         <Box key="actions" flexDirection="row" flexWrap="wrap" gap={1} alignItems="center">
-          <Button key="copy-summary" label="Copy tasks (CSV)" onPress={keep('copy-summary', p => void copy('the task summary', summaryCsv(list, factor), p.surface))} />
-          <Button key="copy-calls" label={`Copy ${callList.length} requests (CSV)`} onPress={keep('copy-calls', p => void copy('the request log', callsCsv(callList, factor), p.surface))} />
+          {action('copy-summary', 'Copy tasks (CSV)', p => void copy('the task summary', summaryCsv(list, factor), p?.surface))}
+          {action('copy-calls', `Copy ${callList.length} requests (CSV)`, p => void copy('the request log', callsCsv(callList, factor), p?.surface))}
           {note !== '' && (
             <Text dimColor size="footnote">
               {note}
@@ -1227,24 +1246,24 @@ export const register: Register = on => {
         <Box key="table" flexDirection="column">
           <Box key="head" flexDirection="row" gap={1}>
             <Box width={1} flexShrink={0} />
-            <Box flexGrow={1} flexShrink={1} minWidth={0} paddingRight={1}>{heading('who', 'WHO')}</Box>
+            <Box flexGrow={1} flexShrink={1} minWidth={0}>{heading('who', 'WHO')}</Box>
             {isWide && cell('m', 12, heading('m', 'MODEL'), false)}
-            {isWide && cell('c', 6, heading('c', 'CALLS'))}
-            {cell('w', 7, heading('w', 'WEIGHT'))}
-            {cell('u', 8, heading('u', 'COST'))}
+            {isWide && cell('c', COLW.count, heading('c', 'CALLS'))}
+            {cell('w', COLW.tokens, heading('w', 'WEIGHT'))}
+            {cell('u', COLW.cost, heading('u', 'COST'))}
           </Box>
           {rows.map(r => (
             <Box key={r.id} flexDirection="row" gap={1}>
               <Box width={1} flexShrink={0}>
                 {swatch(whoColor(r))}
               </Box>
-              <Box flexGrow={1} flexShrink={1} minWidth={0} paddingRight={1}>
+              <Box flexGrow={1} flexShrink={1} minWidth={0}>
                 <Text wrap="truncate-end">{r.type === 'main' ? 'Main thread' : r.who}</Text>
               </Box>
               {isWide && cell('m', 12, <Text dimColor wrap="truncate-end">{r.models.map(modelName).join(', ')}</Text>, false)}
-              {isWide && cell('c', 6, n(String(r.usage.calls), { dim: true }))}
-              {cell('w', 7, n(`${Math.round((100 * weighted(r.usage)) / tw)}%`, { dim: true }))}
-              {cell('u', 8, n(usd(r.usage.usd * factor), { bold: true }))}
+              {isWide && cell('c', COLW.count, n(String(r.usage.calls), { dim: true }))}
+              {cell('w', COLW.tokens, n(`${Math.round((100 * weighted(r.usage)) / tw)}%`, { dim: true }))}
+              {cell('u', COLW.cost, n(usd(r.usage.usd * factor), { bold: true }))}
             </Box>
           ))}
           {splitRow(rows.map(r => ({ value: r.usage.usd, color: whoColor(r) })), inner - 6)}
@@ -1260,17 +1279,17 @@ export const register: Register = on => {
           <Box key="head" flexDirection="row" gap={1} alignItems="center">
             <Box flexGrow={1} flexShrink={1} minWidth={0}>
               {pressable(`open-${t.startedAt}`, [
-                { text: o ? '▾ ' : '▸ ', dim: true },
+                arrowRun(o),
                 { text: t.label, bold: true, color: isNow ? 'claude' : undefined },
                 ...(isNow ? [{ text: '  now', dim: true }] : []),
               ], () => void toggleTask(t))}
             </Box>
             {!isNarrow && (
-              <Text dimColor tabular>
-                {mins(t)} min · {u.calls} calls
-              </Text>
+              <Box flexShrink={1} minWidth={0}>
+                <Text dimColor tabular wrap="truncate-end">{`${mins(t)} min · ${u.calls} calls`}</Text>
+              </Box>
             )}
-            {cell('u', 8, n(usd(u.usd * factor), { bold: true, color: isNow ? 'claude' : undefined }))}
+            {cell('u', COLW.cost, n(usd(u.usd * factor), { bold: true, color: isNow ? 'claude' : undefined }))}
           </Box>
           {o &&
             (u.calls > 0 ? (
@@ -1302,29 +1321,31 @@ export const register: Register = on => {
       recentCalls.length === 0
         ? [<Text key="none" dimColor>No requests yet.</Text>]
         : [
+            <Box key="table" flexDirection="column">
             <Box key="head" flexDirection="row" gap={1}>
-              {cell('t', 5, heading('t', 'TIME'), false)}
+              {cell('t', COLW.time, heading('t', 'TIME'), false)}
               <Box flexGrow={1} flexShrink={1} minWidth={0}>{heading('w', 'WHO')}</Box>
-              {reqTok && isWide && cell('i', 7, heading('i', 'IN+CW'))}
-              {reqTok && !isNarrow && cell('r', 7, heading('r', 'C.READ'))}
-              {reqTok && cell('o', 6, heading('o', 'OUT'))}
-              {cell('u', 7, heading('u', 'COST'))}
-            </Box>,
-            ...recentCalls.map((c, i) => (
+              {reqTok && isWide && cell('i', COLW.tokens, heading('i', 'IN+CW'))}
+              {reqTok && !isNarrow && cell('r', COLW.tokens, heading('r', 'C.READ'))}
+              {reqTok && cell('o', COLW.tokens, heading('o', 'OUT'))}
+              {cell('u', COLW.cost, heading('u', 'COST'))}
+            </Box>
+            {recentCalls.map((c, i) => (
               <Box key={`c${i}`} flexDirection="row" gap={1}>
-                {cell('t', 5, <Text dimColor tabular>{hhmm(c.at)}</Text>, false)}
+                {cell('t', COLW.time, <Text dimColor tabular>{hhmm(c.at)}</Text>, false)}
                 <Box flexGrow={1} flexShrink={1} minWidth={0}>
                   <Text wrap="truncate-end">
                     {c.who === 'main thread' ? 'Main' : c.who}
                     <Text dimColor>{` · ${modelName(c.model)}`}</Text>
                   </Text>
                 </Box>
-                {reqTok && isWide && cell('i', 7, n(k(c.input + c.cacheWrite)))}
-                {reqTok && !isNarrow && cell('r', 7, n(k(c.cacheRead), { dim: true }))}
-                {reqTok && cell('o', 6, n(k(c.output)))}
-                {cell('u', 7, n(usd(c.usd * factor), { bold: true }))}
+                {reqTok && isWide && cell('i', COLW.tokens, n(k(c.input + c.cacheWrite)))}
+                {reqTok && !isNarrow && cell('r', COLW.tokens, n(k(c.cacheRead), { dim: true }))}
+                {reqTok && cell('o', COLW.tokens, n(k(c.output)))}
+                {cell('u', COLW.cost, n(usd(c.usd * factor), { bold: true }))}
               </Box>
-            )),
+            ))}
+            </Box>,
           ]
 
     // ---- sub-agents: the running ones live; totals for all of them from the snapshot
@@ -1375,26 +1396,30 @@ export const register: Register = on => {
           <Box key="types" flexDirection="column">
             <Box key="head" flexDirection="row" gap={1}>
               <Box flexGrow={1} flexShrink={1} minWidth={0}>{heading('t', 'TYPE · MODEL')}</Box>
-              {cell('n', 5, heading('n', 'RUNS'))}
-              {isWide && cell('c', 6, heading('c', 'CALLS'))}
-              {cell('u', 8, heading('u', 'COST'))}
+              {cell('n', COLW.count, heading('n', 'RUNS'))}
+              {isWide && cell('c', COLW.count, heading('c', 'CALLS'))}
+              {cell('u', COLW.cost, heading('u', 'COST'))}
             </Box>
             {agentGroups.map(([key, g2]) => (
               <Box key={key} flexDirection="row" gap={1}>
                 <Box flexGrow={1} flexShrink={1} minWidth={0}>
                   <Text wrap="truncate-end">{key}</Text>
                 </Box>
-                {cell('n', 5, n(String(g2.n), { dim: true }))}
-                {isWide && cell('c', 6, n(String(g2.u.calls), { dim: true }))}
-                {cell('u', 8, n(usd(g2.u.usd * factor), { bold: true }))}
+                {cell('n', COLW.count, n(String(g2.n), { dim: true }))}
+                {isWide && cell('c', COLW.count, n(String(g2.u.calls), { dim: true }))}
+                {cell('u', COLW.cost, n(usd(g2.u.usd * factor), { bold: true }))}
               </Box>
             ))}
           </Box>
         ),
         live.length === 0 ? <Text key="none" dimColor>None running.</Text> : null,
         ...live.map(agentCard),
-        agEx.finished && done.length > 0 && heading('fh', 'FINISHED'),
-        ...(agEx.finished ? done.map(agentCard) : []),
+        agEx.finished && done.length > 0 && (
+          <Box key="finished" flexDirection="column">
+            {heading('fh', 'FINISHED')}
+            <Box key="cards" flexDirection="column" gap={1}>{done.map(agentCard)}</Box>
+          </Box>
+        ),
       ]
     }
 
@@ -1402,22 +1427,24 @@ export const register: Register = on => {
     const gt = BUCKETS.reduce((a, b) => ({ allowed: a.allowed + g.totals[b].allowed, asked: a.asked + g.totals[b].asked, denied: a.denied + g.totals[b].denied }), { allowed: 0, asked: 0, denied: 0 })
     // Fixed columns, so they line up at every pane width.
     const GATE_K = 9
-    const GATE_N = 10
+    const GATE_N = COLW.cost
     const gateBody = () => [
-      <Box key="head" flexDirection="row">
+      <Box key="table" flexDirection="column">
+      <Box key="head" flexDirection="row" gap={1}>
         {cell('k', GATE_K, heading('k', 'KIND'), false)}
         {cell('a', GATE_N, heading('a', 'ALLOWED'))}
         {cell('q', GATE_N, heading('q', 'ASKED'))}
         {cell('d', GATE_N, heading('d', 'DENIED'))}
-      </Box>,
-      ...BUCKETS.filter(b => g.totals[b].allowed + g.totals[b].asked + g.totals[b].denied > 0).map(b => (
-        <Box key={b} flexDirection="row">
+      </Box>
+      {BUCKETS.filter(b => g.totals[b].allowed + g.totals[b].asked + g.totals[b].denied > 0).map(b => (
+        <Box key={b} flexDirection="row" gap={1}>
           {cell('k', GATE_K, <Text>{b}</Text>, false)}
           {cell('a', GATE_N, n(String(g.totals[b].allowed), { color: 'success' }))}
           {cell('q', GATE_N, n(String(g.totals[b].asked), { color: 'warning' }))}
           {cell('d', GATE_N, n(String(g.totals[b].denied), { color: g.totals[b].denied > 0 ? 'error' : undefined, dim: g.totals[b].denied === 0 }))}
         </Box>
-      )),
+      ))}
+      </Box>,
       gt.allowed + gt.asked + gt.denied > 0 &&
         strip('mix', [
           { value: gt.allowed, color: 'success' },
@@ -1474,13 +1501,7 @@ export const register: Register = on => {
             ]),
             ch.memoryChars !== null && (
               <Box key="mem" flexDirection="column">
-                <Box key="h" flexDirection="row" justifyContent="space-between">
-                  {heading('l', 'MEMORY INDEX')}
-                  <Text tabular dimColor>
-                    {`${ch.memoryChars.toLocaleString('en-US')} / ${tg.memBar.toLocaleString('en-US')} chars`}
-                    <Text color={memColor} bold>{`  ${memWord}`}</Text>
-                  </Text>
-                </Box>
+                {labelValue('h', 'MEMORY INDEX', `${ch.memoryChars.toLocaleString('en-US')} / ${tg.memBar.toLocaleString('en-US')} chars`, { text: memWord, color: memColor })}
                 {barRow('bar', [{ value: Math.min(1, ch.memoryChars / tg.memBar), color: memColor }], inner)}
                 <Text size="footnote" dimColor tabular wrap="truncate-end">
                   {`Good to ${tg.memGood.toLocaleString('en-US')} (target) · Fine to ${tg.memFine.toLocaleString('en-US')} · Bad past it`}
@@ -1497,11 +1518,11 @@ export const register: Register = on => {
                   .reverse()
                   .map((r, i) => (
                     <Box key={`r${i}`} flexDirection="row" gap={1}>
-                      {cell('t', 5, <Text dimColor tabular>{hhmm(r.at)}</Text>, false)}
+                      {cell('t', COLW.time, <Text dimColor tabular>{hhmm(r.at)}</Text>, false)}
                       <Box flexGrow={1} flexShrink={1} minWidth={0}>
                         <Text wrap="truncate-end">{WHY[r.why] ?? r.why}</Text>
                       </Box>
-                      {cell('n', 7, n(k(r.tokens)))}
+                      {cell('n', COLW.tokens, n(k(r.tokens)))}
                     </Box>
                   ))
               )}
@@ -1516,7 +1537,7 @@ export const register: Register = on => {
                     <Box flexGrow={1} flexShrink={1} minWidth={0}>
                       <Text wrap="truncate-end">{toolName(t.name)}</Text>
                     </Box>
-                    {cell('n', 7, n(k(t.chars)))}
+                    {cell('n', COLW.tokens, n(k(t.chars)))}
                   </Box>
                 ))
               )}
@@ -1528,12 +1549,12 @@ export const register: Register = on => {
     const logBody = () =>
       shownEvents.length === 0
         ? [<Text key="none" dimColor>Nothing yet.</Text>]
-        : shownEvents
+        : [<Box key="table" flexDirection="column">{shownEvents
             .slice(-20)
             .reverse()
             .map((l, i) => (
               <Box key={`l${i}`} flexDirection="row" gap={1}>
-                {cell('t', 5, <Text dimColor tabular>{hhmm(l.at)}</Text>, false)}
+                {cell('t', COLW.time, <Text dimColor tabular>{hhmm(l.at)}</Text>, false)}
                 {!isNarrow && cell('w', 10, <Text color={l.kind === 'error' ? 'error' : l.kind === 'done' ? 'success' : undefined} wrap="truncate-end">{l.who}</Text>, false)}
                 <Box flexGrow={1} flexShrink={1} minWidth={0}>
                   <Text dimColor={l.kind === 'info'} color={l.kind === 'error' ? 'error' : undefined} wrap="truncate-end">
@@ -1541,7 +1562,7 @@ export const register: Register = on => {
                   </Text>
                 </Box>
               </Box>
-            ))
+            ))}</Box>]
 
     const copy = async (what: string, text: string, surface: Parameters<typeof $.ui.copy>[0]['surface']) => {
       const r = await $.ui.copy({ text, surface })

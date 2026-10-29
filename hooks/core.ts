@@ -460,16 +460,16 @@ export const THEMES: Record<string, Theme> = {
     name: 'Frostwerk',
     bg: '#02060d', card: '#070e17', fg: '#e8ebef', muted: '#848d98', border: '#2b333f',
     keys: {
-      claude: '#00c2e8', suggestion: '#00c2e8', success: '#4bc98f', warning: '#fb7c00', error: '#db4241',
-      text: '#b9d3db', merged: '#9e91e4', bashBorder: '#fb7c00', planMode: '#5b748e', inactive: '#848d98', permission: '#9e91e4',
+      claude: '#00c2e8', suggestion: '#00c2e8', success: '#4bc98f', warning: '#fb7c00', error: '#ee5f5d',
+      text: '#b9d3db', merged: '#9e91e4', bashBorder: '#fb7c00', planMode: '#7d97b3', inactive: '#848d98', permission: '#9e91e4',
     },
   },
   reader: {
     name: 'Reader',
-    bg: '#efe8db', card: '#f7f3ea', fg: '#2f2c28', muted: '#8b8375', border: '#cdc2ae',
+    bg: '#efe8db', card: '#f7f3ea', fg: '#2f2c28', muted: '#655e52', border: '#cdc2ae',
     keys: {
-      claude: '#46545c', suggestion: '#46545c', success: '#5b7a4a', warning: '#8a5a1f', error: '#a1463a',
-      text: '#5e584f', merged: '#7a5e86', bashBorder: '#a1463a', planMode: '#4f7470', inactive: '#b3aa9a', permission: '#6a6f94',
+      claude: '#46545c', suggestion: '#46545c', success: '#4b6a3c', warning: '#8a5a1f', error: '#a1463a',
+      text: '#5e584f', merged: '#7a5e86', bashBorder: '#a1463a', planMode: '#456865', inactive: '#6f6759', permission: '#585d84',
     },
   },
 }
