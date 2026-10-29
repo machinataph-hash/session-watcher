@@ -114,9 +114,12 @@ const INDENT = 1
 const COL_GAP = 2
 // Fixed widths: the arrow column of list rows, a stat column, a settings group, and the table's numeric columns.
 const ARROW_W = 3
-const STAT_W = 20
-const GROUP_W = 30
-const COLW = { time: 5, count: 6, tokens: 7, pct: 5, cost: 8 } as const
+// The narrowest a stat column or settings group may be before the grid drops to fewer columns.
+const STAT_MIN = 16
+const GROUP_MIN = 24
+// Every numeric table column: one width, right-aligned; the free-text column takes the rest.
+const NUM_W = 8
+const COLW = { time: NUM_W, count: NUM_W, tokens: NUM_W, pct: NUM_W, cost: NUM_W } as const
 // Between a tick and its label, on every tick list.
 const TICK_GAP = '  '
 const CARD = { flexDirection: 'column', borderStyle: 'single', borderColor: 'inactive', borderDimColor: true, paddingX: INSET } as const
@@ -652,6 +655,46 @@ export const register: Register = on => {
         </Box>
       </Box>
     )
+    // DESIGN 7: one column-def list per table, shared by its header and its rows. The free-text column grows; numeric
+    // columns are NUM_W and right-aligned, header included. Narrower than the table's minimum, each row stacks as
+    // label: value lines instead of squeezing.
+    type Col = { id: string; label: string; kind: 'free' | 'num' | 'text' | 'mark'; w?: number }
+    const colBox = (c: Col, node: unknown) =>
+      c.kind === 'free' ? (
+        <Box key={c.id} flexGrow={1} flexShrink={1} minWidth={0}>{node as never}</Box>
+      ) : (
+        <Box key={c.id} width={c.kind === 'num' ? NUM_W : c.w ?? NUM_W} flexShrink={0} justifyContent={c.kind === 'num' ? 'flex-end' : 'flex-start'}>{node as never}</Box>
+      )
+    const table = (key: string, cols0: (Col | false)[], rows: { key: string; cells: Record<string, unknown> }[], room = inner, after?: unknown) => {
+      const cols = cols0.filter(Boolean) as Col[]
+      const min = 10 + cols.filter(c => c.kind !== 'free').reduce((a, c) => a + (c.kind === 'num' ? NUM_W : c.w ?? NUM_W) + 1, 0)
+      if (room >= min)
+        return (
+          <Box key={key} flexDirection="column">
+            <Box key="head" flexDirection="row" gap={1}>{cols.map(c => colBox(c, c.kind === 'mark' ? null : heading(c.id, c.label)))}</Box>
+            {rows.map(r => (
+              <Box key={r.key} flexDirection="row" gap={1}>{cols.map(c => colBox(c, r.cells[c.id] ?? null))}</Box>
+            ))}
+            {after as never}
+          </Box>
+        )
+      return (
+        <Box key={key} flexDirection="column" gap={1}>
+          {rows.map(r => (
+            <Box key={r.key} flexDirection="column">
+              {cols.filter(c => c.kind === 'free').map(c => <Box key={c.id}>{r.cells[c.id] as never}</Box>)}
+              {cols.filter(c => c.kind === 'num' || c.kind === 'text').map(c => (
+                <Box key={c.id} flexDirection="row" gap={1} justifyContent="space-between">
+                  <Text dimColor wrap="truncate-end">{c.label}</Text>
+                  <Box flexShrink={0}>{r.cells[c.id] as never}</Box>
+                </Box>
+              ))}
+            </Box>
+          ))}
+          {after as never}
+        </Box>
+      )
+    }
     const cell = (key: string, w: number, node: unknown, right = true) => (
       <Box key={key} width={w} flexShrink={0} justifyContent={right ? 'flex-end' : 'flex-start'}>
         {node as never}
@@ -889,12 +932,37 @@ export const register: Register = on => {
     // In the terminal, one row when wide with the columns spread edge to edge; narrower, halves or full rows.
     // Outside the terminal every column is one fixed width, packed from the left and wrapped by the surface,
     // so columns line up across rows and cards at every pane width instead of spreading apart.
-    // DESIGN 6: every stat column is STAT_W wide on every surface, packed from the left and wrapped, so columns line
-    // up across rows and cards; only a pane narrower than one column gives it the full row.
-    const statW: number | string = inner < STAT_W ? '100%' : STAT_W
-    const stat3 = statW
-    const stat = (key: string, label: string, value: string, opts: { color?: 'claude' | 'error' | 'warning' | 'success'; sub?: string; w?: string | number } = {}) => (
-      <Box key={key} flexDirection="column" width={opts.w ?? statW} flexShrink={0}>
+    // DESIGN 6: a grid of equal columns, wall to wall. With the pane width known, as many columns as fit at `min`
+    // (all, else two, else one); every row has that count, a short last row padded with empty cells so nothing stretches.
+    // Width unknown (0): the surface wraps cells of at least `min` itself.
+    const knownW = (e.props.bodyColumns ?? 0) > 0
+    const gridCell = (key: string, node: unknown, min?: number) => (
+      <Box key={key} flexDirection="column" flexGrow={1} flexShrink={1} width={min ?? 0} minWidth={min ?? 0}>{node as never}</Box>
+    )
+    const grid = (key: string, items0: unknown[], min: number, width = inner) => {
+      const items = items0.filter(Boolean)
+      if (!knownW)
+        return (
+          <Box key={key} flexDirection="row" flexWrap="wrap" columnGap={COL_GAP} rowGap={1}>
+            {items.map((it, i) => gridCell(`g${i}`, it, min))}
+          </Box>
+        )
+      const fits = (n: number) => n * min + (n - 1) * COL_GAP <= width
+      const per = [items.length, 2, 1].find(n => n <= items.length && fits(n)) ?? 1
+      const rows: unknown[][] = []
+      for (let i = 0; i < items.length; i += per) rows.push(items.slice(i, i + per))
+      return (
+        <Box key={key} flexDirection="column" gap={1}>
+          {rows.map((r, j) => (
+            <Box key={`row${j}`} flexDirection="row" gap={COL_GAP}>
+              {[...r, ...Array(per - r.length).fill(null)].map((it, i) => gridCell(`g${i}`, it))}
+            </Box>
+          ))}
+        </Box>
+      )
+    }
+    const stat = (key: string, label: string, value: string, opts: { color?: 'claude' | 'error' | 'warning' | 'success'; sub?: string } = {}) => (
+      <Box key={key} flexDirection="column">
         {heading('l', label)}
         <Text size="heading" weight="semibold" bold tabular color={opts.color} wrap="truncate-end">
           {value}
@@ -906,11 +974,7 @@ export const register: Register = on => {
         ) : null}
       </Box>
     )
-    const stats = (key: string, items: unknown[]) => (
-      <Box key={key} flexDirection="row" flexWrap="wrap" justifyContent="flex-start" columnGap={COL_GAP} rowGap={1}>
-        {items as never}
-      </Box>
-    )
+    const stats = (key: string, items: unknown[]) => grid(key, items, STAT_MIN)
 
     // A transcript read has landed (its time may be 0 under a test clock; its models are what count).
     const hasScan = sc.at > 0 || Object.keys(sc.byModel).length > 0
@@ -1010,7 +1074,7 @@ export const register: Register = on => {
         <Box key="rows" flexDirection="column">
           {TARGETS.map(d => (
             <Box key={d.id} flexDirection="row" gap={1} alignItems="center">
-              <Box width={27} flexShrink={0}>
+              <Box flexGrow={1} flexShrink={1} minWidth={0}>
                 <Text dimColor wrap="truncate-end">{d.label}</Text>
               </Box>
               <Box width={2} flexShrink={0}>{pressable(`tg-${d.id}-dn`, [{ text: '−', bold: canStep(lay, d.id, -1), dim: !canStep(lay, d.id, -1) }], () => setLayout({ target: { id: d.id, by: -1 } }))}</Box>
@@ -1028,9 +1092,9 @@ export const register: Register = on => {
     // terminal each group takes the full row; wider (and on surfaces that wrap by their own width) they share rows.
     // DESIGN 11: settings groups are GROUP_W wide, packed from the left and wrapped, so they align at every width;
     // a pane narrower than one group gives each the full row.
-    const isStacked = inner < GROUP_W
+    // DESIGN 11: the groups are a grid like the stats, wall to wall, GROUP_MIN cells at the least.
     const group = (key: string, label: string, note: string, body: unknown) => (
-      <Box key={key} flexDirection="column" gap={1} width={isStacked ? '100%' : GROUP_W} flexGrow={0} flexShrink={0}>
+      <Box key={key} flexDirection="column" gap={1}>
         <Box key="h" flexDirection="column">
           {heading('l', label)}
           <Text size="footnote" dimColor wrap="wrap">{note}</Text>
@@ -1054,15 +1118,15 @@ export const register: Register = on => {
               {action('toggle-all', allOpen ? 'Collapse all' : 'Open all', () => void toggleAll())}
             </Box>,
             // Labelled groups, each a fixed share of the row: two side by side when wide, stacked when narrow.
-            <Box key="cols" flexDirection="row" flexWrap="wrap" justifyContent="flex-start" columnGap={COL_GAP} rowGap={1}>
-              {group('cards', 'CARDS', 'Tick to show, drag to move. Each card has its own ⚙ for its extras.', chips)}
-              {group('main-extras', 'MAIN CARD', 'Extras shown in this card.', extraTicks('vitals'))}
-              {group('sample', 'SAMPLE DATA', 'Fill empty cards with labelled sample values.', (
+            grid('cols', [
+              group('cards', 'CARDS', 'Tick to show, drag to move. Each card has its own ⚙ for its extras.', chips),
+              group('main-extras', 'MAIN CARD', 'Extras shown in this card.', extraTicks('vitals')),
+              group('sample', 'SAMPLE DATA', 'Fill empty cards with labelled sample values.', (
                 <Box key="sample-list" flexDirection="column" paddingLeft={INDENT}>
                   {pressable('sample-data', [tickRun(isSample), { text: `${TICK_GAP}Sample data`, dim: !isSample }], () => setLayout({ sample: true }))}
                 </Box>
-              ))}
-              {group('themes', 'THEME', canTheme ? 'Colours for the whole pane.' : 'Applies in the terminal. The desktop keeps the app colours, so text stays readable in light and dark mode.', Client ? (
+              )),
+              group('themes', 'THEME', canTheme ? 'Colours for the whole pane.' : 'Applies in the terminal. The desktop keeps the app colours, so text stays readable in light and dark mode.', Client ? (
                 <Client key={`${TICKS}-theme`} module="./chips.tsx" props={{ isFixed: true, items: themeChoices.map(o => ({ id: `theme:${o.id}`, title: o.name, isShown: (lay.theme ?? 'app') === o.id })), ...palette }} height={themeChoices.length} />
               ) : (
                 <Box key="theme-list" flexDirection="column" paddingLeft={INDENT}>
@@ -1071,8 +1135,8 @@ export const register: Register = on => {
                     return pressable(`theme-${o.id}`, [tickRun(isOn), { text: `${TICK_GAP}${o.name}`, dim: !isOn }], () => setLayout({ theme: o.id === 'app' ? null : o.id }))
                   })}
                 </Box>
-              ))}
-            </Box>,
+              )),
+            ], GROUP_MIN),
       ],
       isOpen: true,
       body: () => (
@@ -1186,36 +1250,21 @@ export const register: Register = on => {
         stat('w', 'WEIGHTED', k(weighted(total)), { sub: 'tokens by price' }),
       ]),
       kinds('kinds', total, inner, sessEx.tokens, hasScan ? snapCost : undefined),
-      byModel.length > 0 && (
-        <Box key="who" flexDirection="column">
-          <Box key="head" flexDirection="row" gap={1}>
-            <Box width={1} flexShrink={0} />
-            <Box flexGrow={1} flexShrink={1} minWidth={0}>{heading('w', 'WHO · MODEL')}</Box>
-            {isWide && cell('c', COLW.count, heading('c', 'CALLS'))}
-            {cell('o', COLW.tokens, heading('o', 'OUTPUT'))}
-            {sessEx.tokens && cell('w', COLW.tokens, heading('w', 'WEIGHT'))}
-            {cell('u', COLW.cost, heading('u', 'COST'))}
-          </Box>
-          {byModel.map(r => (
-            <Box key={r.id} flexDirection="row" gap={1}>
-              <Box width={1} flexShrink={0}>
-                {swatch(r.color)}
-              </Box>
-              <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                <Text wrap="truncate-end">
-                  {r.who}
-                  <Text dimColor>{` · ${modelName(r.model)}`}</Text>
-                </Text>
-              </Box>
-              {isWide && cell('c', COLW.count, n(String(r.u.calls), { dim: true }))}
-              {cell('o', COLW.tokens, n(k(r.u.output)))}
-              {sessEx.tokens && cell('w', COLW.tokens, n(`${Math.round((100 * weighted(r.u)) / (weighted(total) || 1))}%`, { dim: true }))}
-              {cell('u', COLW.cost, n(usd(r.u.usd * factor), { bold: true }))}
-            </Box>
-          ))}
-          {splitRow(byModel.map(r => ({ value: r.u.usd, color: r.color })), inner)}
-        </Box>
-      ),
+      byModel.length > 0 && table('who', [
+        { id: 'sw', label: '', kind: 'mark', w: 1 },
+        { id: 'w', label: 'WHO · MODEL', kind: 'free' },
+        isWide && { id: 'c', label: 'CALLS', kind: 'num' },
+        { id: 'o', label: 'OUTPUT', kind: 'num' },
+        sessEx.tokens && { id: 'wt', label: 'WEIGHT', kind: 'num' },
+        { id: 'u', label: 'COST', kind: 'num' },
+      ], byModel.map(r => ({ key: r.id, cells: {
+        sw: swatch(r.color),
+        w: <Text wrap="truncate-end">{r.who}<Text dimColor>{` · ${modelName(r.model)}`}</Text></Text>,
+        c: n(String(r.u.calls), { dim: true }),
+        o: n(k(r.u.output)),
+        wt: n(`${Math.round((100 * weighted(r.u)) / (weighted(total) || 1))}%`, { dim: true }),
+        u: n(usd(r.u.usd * factor), { bold: true }),
+      } })), inner, splitRow(byModel.map(r => ({ value: r.u.usd, color: r.color })), inner)),
       <Text key="src" size="footnote" dimColor>
         {hasScan ? `From the transcripts, main and every sub-agent, read at ${hhmm(sc.at)} (after each turn). Rows add up to the total above.` : 'Reading the transcripts…'}
       </Text>,
@@ -1242,33 +1291,21 @@ export const register: Register = on => {
     const taskTable = (t: Task) => {
       const tw = weighted(taskTotal(t)) || 1
       const rows = [t.main, ...t.agents].filter(r => r.usage.calls > 0).sort((a, b) => b.usage.usd - a.usage.usd)
-      return (
-        <Box key="table" flexDirection="column">
-          <Box key="head" flexDirection="row" gap={1}>
-            <Box width={1} flexShrink={0} />
-            <Box flexGrow={1} flexShrink={1} minWidth={0}>{heading('who', 'WHO')}</Box>
-            {isWide && cell('m', 12, heading('m', 'MODEL'), false)}
-            {isWide && cell('c', COLW.count, heading('c', 'CALLS'))}
-            {cell('w', COLW.tokens, heading('w', 'WEIGHT'))}
-            {cell('u', COLW.cost, heading('u', 'COST'))}
-          </Box>
-          {rows.map(r => (
-            <Box key={r.id} flexDirection="row" gap={1}>
-              <Box width={1} flexShrink={0}>
-                {swatch(whoColor(r))}
-              </Box>
-              <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                <Text wrap="truncate-end">{r.type === 'main' ? 'Main thread' : r.who}</Text>
-              </Box>
-              {isWide && cell('m', 12, <Text dimColor wrap="truncate-end">{r.models.map(modelName).join(', ')}</Text>, false)}
-              {isWide && cell('c', COLW.count, n(String(r.usage.calls), { dim: true }))}
-              {cell('w', COLW.tokens, n(`${Math.round((100 * weighted(r.usage)) / tw)}%`, { dim: true }))}
-              {cell('u', COLW.cost, n(usd(r.usage.usd * factor), { bold: true }))}
-            </Box>
-          ))}
-          {splitRow(rows.map(r => ({ value: r.usage.usd, color: whoColor(r) })), inner - 6)}
-        </Box>
-      )
+      return table('table', [
+        { id: 'sw', label: '', kind: 'mark', w: 1 },
+        { id: 'who', label: 'WHO', kind: 'free' },
+        isWide && { id: 'm', label: 'MODEL', kind: 'text', w: 12 },
+        isWide && { id: 'c', label: 'CALLS', kind: 'num' },
+        { id: 'w', label: 'WEIGHT', kind: 'num' },
+        { id: 'u', label: 'COST', kind: 'num' },
+      ], rows.map(r => ({ key: r.id, cells: {
+        sw: swatch(whoColor(r)),
+        who: <Text wrap="truncate-end">{r.type === 'main' ? 'Main thread' : r.who}</Text>,
+        m: <Text dimColor wrap="truncate-end">{r.models.map(modelName).join(', ')}</Text>,
+        c: n(String(r.usage.calls), { dim: true }),
+        w: n(`${Math.round((100 * weighted(r.usage)) / tw)}%`, { dim: true }),
+        u: n(usd(r.usage.usd * factor), { bold: true }),
+      } })), inner - 4, splitRow(rows.map(r => ({ value: r.usage.usd, color: whoColor(r) })), inner - 6))
     }
     const taskCard = (t: Task) => {
       const u = taskTotal(t)
@@ -1321,31 +1358,21 @@ export const register: Register = on => {
       recentCalls.length === 0
         ? [<Text key="none" dimColor>No requests yet.</Text>]
         : [
-            <Box key="table" flexDirection="column">
-            <Box key="head" flexDirection="row" gap={1}>
-              {cell('t', COLW.time, heading('t', 'TIME'), false)}
-              <Box flexGrow={1} flexShrink={1} minWidth={0}>{heading('w', 'WHO')}</Box>
-              {reqTok && isWide && cell('i', COLW.tokens, heading('i', 'IN+CW'))}
-              {reqTok && !isNarrow && cell('r', COLW.tokens, heading('r', 'C.READ'))}
-              {reqTok && cell('o', COLW.tokens, heading('o', 'OUT'))}
-              {cell('u', COLW.cost, heading('u', 'COST'))}
-            </Box>
-            {recentCalls.map((c, i) => (
-              <Box key={`c${i}`} flexDirection="row" gap={1}>
-                {cell('t', COLW.time, <Text dimColor tabular>{hhmm(c.at)}</Text>, false)}
-                <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                  <Text wrap="truncate-end">
-                    {c.who === 'main thread' ? 'Main' : c.who}
-                    <Text dimColor>{` · ${modelName(c.model)}`}</Text>
-                  </Text>
-                </Box>
-                {reqTok && isWide && cell('i', COLW.tokens, n(k(c.input + c.cacheWrite)))}
-                {reqTok && !isNarrow && cell('r', COLW.tokens, n(k(c.cacheRead), { dim: true }))}
-                {reqTok && cell('o', COLW.tokens, n(k(c.output)))}
-                {cell('u', COLW.cost, n(usd(c.usd * factor), { bold: true }))}
-              </Box>
-            ))}
-            </Box>,
+            table('table', [
+              { id: 't', label: 'TIME', kind: 'text', w: 5 },
+              { id: 'w', label: 'WHO', kind: 'free' },
+              reqTok && isWide && { id: 'i', label: 'IN+CW', kind: 'num' },
+              reqTok && !isNarrow && { id: 'r', label: 'C.READ', kind: 'num' },
+              reqTok && { id: 'o', label: 'OUT', kind: 'num' },
+              { id: 'u', label: 'COST', kind: 'num' },
+            ], recentCalls.map((c, i) => ({ key: `c${i}`, cells: {
+              t: <Text dimColor tabular>{hhmm(c.at)}</Text>,
+              w: <Text wrap="truncate-end">{c.who === 'main thread' ? 'Main' : c.who}<Text dimColor>{` · ${modelName(c.model)}`}</Text></Text>,
+              i: n(k(c.input + c.cacheWrite)),
+              r: n(k(c.cacheRead), { dim: true }),
+              o: n(k(c.output)),
+              u: n(usd(c.usd * factor), { bold: true }),
+            } }))),
           ]
 
     // ---- sub-agents: the running ones live; totals for all of them from the snapshot
@@ -1388,30 +1415,21 @@ export const register: Register = on => {
       const done = cards.filter(c => c.status !== 'running').slice().reverse().slice(0, 12)
       return [
         stats('s', [
-          stat('n', 'SUB-AGENTS', String(agentCount), { sub: `${running} running`, w: stat3 }),
-          stat('c', 'COST', usd(agentCost), { color: 'claude', sub: `${snapCost > 0 ? Math.round((100 * agentCost) / snapCost) : 0}% of ${usd(snapCost)}`, w: stat3 }),
-          stat('r', 'COST / REQUEST', perReq(agentCost, agentU.calls), { sub: `${agentU.calls} requests`, w: stat3 }),
+          stat('n', 'SUB-AGENTS', String(agentCount), { sub: `${running} running` }),
+          stat('c', 'COST', usd(agentCost), { color: 'claude', sub: `${snapCost > 0 ? Math.round((100 * agentCost) / snapCost) : 0}% of ${usd(snapCost)}` }),
+          stat('r', 'COST / REQUEST', perReq(agentCost, agentU.calls), { sub: `${agentU.calls} requests` }),
         ]),
-        agEx.breakdown && agentGroups.length > 0 && (
-          <Box key="types" flexDirection="column">
-            <Box key="head" flexDirection="row" gap={1}>
-              <Box flexGrow={1} flexShrink={1} minWidth={0}>{heading('t', 'TYPE · MODEL')}</Box>
-              {cell('n', COLW.count, heading('n', 'RUNS'))}
-              {isWide && cell('c', COLW.count, heading('c', 'CALLS'))}
-              {cell('u', COLW.cost, heading('u', 'COST'))}
-            </Box>
-            {agentGroups.map(([key, g2]) => (
-              <Box key={key} flexDirection="row" gap={1}>
-                <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                  <Text wrap="truncate-end">{key}</Text>
-                </Box>
-                {cell('n', COLW.count, n(String(g2.n), { dim: true }))}
-                {isWide && cell('c', COLW.count, n(String(g2.u.calls), { dim: true }))}
-                {cell('u', COLW.cost, n(usd(g2.u.usd * factor), { bold: true }))}
-              </Box>
-            ))}
-          </Box>
-        ),
+        agEx.breakdown && agentGroups.length > 0 && table('types', [
+          { id: 't', label: 'TYPE · MODEL', kind: 'free' },
+          { id: 'n', label: 'RUNS', kind: 'num' },
+          isWide && { id: 'c', label: 'CALLS', kind: 'num' },
+          { id: 'u', label: 'COST', kind: 'num' },
+        ], agentGroups.map(([key, g2]) => ({ key, cells: {
+          t: <Text wrap="truncate-end">{key}</Text>,
+          n: n(String(g2.n), { dim: true }),
+          c: n(String(g2.u.calls), { dim: true }),
+          u: n(usd(g2.u.usd * factor), { bold: true }),
+        } }))),
         live.length === 0 ? <Text key="none" dimColor>None running.</Text> : null,
         ...live.map(agentCard),
         agEx.finished && done.length > 0 && (
@@ -1426,25 +1444,18 @@ export const register: Register = on => {
     // ---- permissions
     const gt = BUCKETS.reduce((a, b) => ({ allowed: a.allowed + g.totals[b].allowed, asked: a.asked + g.totals[b].asked, denied: a.denied + g.totals[b].denied }), { allowed: 0, asked: 0, denied: 0 })
     // Fixed columns, so they line up at every pane width.
-    const GATE_K = 9
-    const GATE_N = COLW.cost
     const gateBody = () => [
-      <Box key="table" flexDirection="column">
-      <Box key="head" flexDirection="row" gap={1}>
-        {cell('k', GATE_K, heading('k', 'KIND'), false)}
-        {cell('a', GATE_N, heading('a', 'ALLOWED'))}
-        {cell('q', GATE_N, heading('q', 'ASKED'))}
-        {cell('d', GATE_N, heading('d', 'DENIED'))}
-      </Box>
-      {BUCKETS.filter(b => g.totals[b].allowed + g.totals[b].asked + g.totals[b].denied > 0).map(b => (
-        <Box key={b} flexDirection="row" gap={1}>
-          {cell('k', GATE_K, <Text>{b}</Text>, false)}
-          {cell('a', GATE_N, n(String(g.totals[b].allowed), { color: 'success' }))}
-          {cell('q', GATE_N, n(String(g.totals[b].asked), { color: 'warning' }))}
-          {cell('d', GATE_N, n(String(g.totals[b].denied), { color: g.totals[b].denied > 0 ? 'error' : undefined, dim: g.totals[b].denied === 0 }))}
-        </Box>
-      ))}
-      </Box>,
+      table('table', [
+        { id: 'k', label: 'KIND', kind: 'free' },
+        { id: 'a', label: 'ALLOWED', kind: 'num' },
+        { id: 'q', label: 'ASKED', kind: 'num' },
+        { id: 'd', label: 'DENIED', kind: 'num' },
+      ], BUCKETS.filter(b => g.totals[b].allowed + g.totals[b].asked + g.totals[b].denied > 0).map(b => ({ key: b, cells: {
+        k: <Text wrap="truncate-end">{b}</Text>,
+        a: n(String(g.totals[b].allowed), { color: 'success' }),
+        q: n(String(g.totals[b].asked), { color: 'warning' }),
+        d: n(String(g.totals[b].denied), { color: g.totals[b].denied > 0 ? 'error' : undefined, dim: g.totals[b].denied === 0 }),
+      } }))),
       gt.allowed + gt.asked + gt.denied > 0 &&
         strip('mix', [
           { value: gt.allowed, color: 'success' },
@@ -1495,9 +1506,9 @@ export const register: Register = on => {
         ? [<Text key="none" dimColor>{hasScan ? 'No cache data in the transcripts.' : 'Reading the transcripts…'}</Text>]
         : [
             stats('c', [
-              stat('h', 'CACHE HIT RATE', hitRate !== null ? `${Math.round(100 * hitRate)}%` : '—', { color: 'claude', sub: 'input read from the cache', w: stat3 }),
-              stat('f', 'STARTING LOAD', k(ch.first), { sub: 'first request', w: stat3 }),
-              stat('r', 'REBUILDS', String(ch.rebuildCount), { sub: `${k(ch.rebuildTokens)} written`, w: stat3 }),
+              stat('h', 'CACHE HIT RATE', hitRate !== null ? `${Math.round(100 * hitRate)}%` : '—', { color: 'claude', sub: 'input read from the cache' }),
+              stat('f', 'STARTING LOAD', k(ch.first), { sub: 'first request' }),
+              stat('r', 'REBUILDS', String(ch.rebuildCount), { sub: `${k(ch.rebuildTokens)} written` }),
             ]),
             ch.memoryChars !== null && (
               <Box key="mem" flexDirection="column">
