@@ -948,7 +948,7 @@ export const register: Register = on => {
                         <Text dimColor wrap="truncate-end">{d.label}</Text>
                       </Box>
                       <Box width={2} flexShrink={0}>{pressable(`tg-${d.id}-dn`, [{ text: '−', bold: canStep(lay, d.id, -1), dim: !canStep(lay, d.id, -1) }], () => setLayout({ target: { id: d.id, by: -1 } }))}</Box>
-                      <Box width={7} flexShrink={0} justifyContent="flex-end">
+                      <Box width={9} flexShrink={0} justifyContent="flex-end">
                         <Text tabular bold={tg[d.id] !== d.value} color={tg[d.id] !== d.value ? 'claude' : undefined}>{tg[d.id].toLocaleString('en-US')}</Text>
                       </Box>
                       <Box width={2} flexShrink={0}>{pressable(`tg-${d.id}-up`, [{ text: '+', bold: canStep(lay, d.id, 1), dim: !canStep(lay, d.id, 1) }], () => setLayout({ target: { id: d.id, by: 1 } }))}</Box>
