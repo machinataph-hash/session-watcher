@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 import Chips from './chips'
-import { applyLayoutMessage, breakdownText, cleanLayout, defaultLayout, targetsOf, emptyLimitModel, estimateLimit, fromModel, paint, THEMES, stepLimitModel, usdOf, weighted } from './core'
+import { applyLayoutMessage, breakdownText, canStep, cleanLayout, defaultLayout, targetsOf, emptyLimitModel, estimateLimit, fromModel, paint, THEMES, stepLimitModel, usdOf, weighted } from './core'
 
 const pane = { title: '', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} } as const
 const usage = { model: 'claude-opus-5-5', input_tokens: 1000, output_tokens: 2000, cache_read_input_tokens: 100000, cache_creation_input_tokens: 4000 }
@@ -433,12 +433,24 @@ test('targets: steps move within range, order holds, defaults are not stored, re
   expect(l.targets).toEqual({ memGood: 4400 })
   l = applyLayoutMessage(l, { target: { id: 'memGood', by: -1 } })
   expect(l.targets).toBeUndefined()
-  // Good may not pass Fine: raising Good past it carries Fine up with it.
+  // Good stops 200 short of Fine; the step that would cross is refused and its button marked.
   for (let i = 0; i < 10; i++) l = applyLayoutMessage(l, { target: { id: 'memGood', by: 1 } })
-  const t = targetsOf(l)
-  expect(t.memGood).toBe(6200)
-  expect(t.memFine).toBeGreaterThan(t.memGood)
-  expect(t.memBar).toBeGreaterThanOrEqual(t.memFine)
+  expect(targetsOf(l).memGood).toBe(5600)
+  expect(l.targets).toEqual({ memGood: 5600 })
+  expect(canStep(l, 'memGood', 1)).toBe(false)
+  expect(canStep(l, 'memFine', -1)).toBe(false)
+  expect(canStep(l, 'memFine', 1)).toBe(true)
+  // Raising Fine makes room for Good again, and lowering Fine back returns it to the stored default.
+  l = applyLayoutMessage(l, { target: { id: 'memFine', by: 1 } })
+  expect(canStep(l, 'memGood', 1)).toBe(true)
+  l = applyLayoutMessage(l, { target: { id: 'memFine', by: -1 } })
+  expect(l.targets).toEqual({ memGood: 5600 })
+  // A stored Good above the default Fine carries Fine up when read, without storing it.
+  const carried = cleanLayout({ targets: { memGood: 6000 } })
+  expect(carried.targets).toEqual({ memGood: 6000 })
+  expect(targetsOf(carried).memFine).toBe(6200)
+  expect(targetsOf(carried).memBar).toBe(10000)
+  expect(targetsOf(cleanLayout({ targets: { memGood: 99999 } })).memFine).toBeLessThanOrEqual(30000)
   // A limit never leaves its range, and an unknown id or step changes nothing.
   let c = base
   for (let i = 0; i < 30; i++) c = applyLayoutMessage(c, { target: { id: 'ctxBad', by: 1 } })

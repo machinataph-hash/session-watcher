@@ -279,9 +279,9 @@ export const defaultLayout = (): Layout => ({ order: [...SECTION_IDS], hidden: [
 // memory index (green to Good, orange to Fine, red past it, the bar Bar wide); context and plan limits
 // are percents (orange from Warn, red from Bad); requests per turn turn red past the limit.
 export const TARGETS: { id: keyof Targets; label: string; value: number; step: number; min: number; max: number }[] = [
-  { id: 'memGood', label: 'Memory index: good to', value: 4200, step: 200, min: 1000, max: 30000 },
-  { id: 'memFine', label: 'Memory index: fine to', value: 5800, step: 200, min: 1000, max: 30000 },
-  { id: 'memBar', label: 'Memory index: bar width', value: 10000, step: 1000, min: 2000, max: 40000 },
+  { id: 'memGood', label: 'Memory index: good to', value: 4200, step: 200, min: 1000, max: 29800 },
+  { id: 'memFine', label: 'Memory index: fine to', value: 5800, step: 200, min: 1200, max: 30000 },
+  { id: 'memBar', label: 'Memory index: bar width', value: 10000, step: 1000, min: 1200, max: 40000 },
   { id: 'ctxWarn', label: 'Context: orange from %', value: 65, step: 5, min: 10, max: 95 },
   { id: 'ctxBad', label: 'Context: red from %', value: 85, step: 5, min: 15, max: 100 },
   { id: 'limWarn', label: 'Plan limits: orange from %', value: 60, step: 5, min: 10, max: 95 },
@@ -289,24 +289,51 @@ export const TARGETS: { id: keyof Targets; label: string; value: number; step: n
   { id: 'turnMax', label: 'Requests per turn: limit', value: 15, step: 1, min: 1, max: 200 },
 ]
 
-/** The limits in force: the saved ones over the defaults, then held in order (good < fine <= bar, warn < bad). */
-export const targetsOf = (l: Layout): Targets => {
-  const t = Object.fromEntries(TARGETS.map(d => [d.id, d.value])) as Targets
+// Each stored limit within its own range; anything else is dropped.
+const savedTargets = (raw: unknown): Partial<Targets> => {
+  const r = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>
+  const out: Partial<Targets> = {}
   for (const d of TARGETS) {
-    const v = l.targets?.[d.id]
-    if (typeof v === 'number' && Number.isFinite(v)) t[d.id] = Math.max(d.min, Math.min(d.max, Math.round(v)))
+    const v = r[d.id]
+    if (typeof v === 'number' && Number.isFinite(v)) out[d.id] = Math.max(d.min, Math.min(d.max, Math.round(v)))
   }
-  t.memFine = Math.max(t.memFine, t.memGood + 200)
-  t.memBar = Math.max(t.memBar, t.memFine)
-  t.ctxBad = Math.max(t.ctxBad, t.ctxWarn + 5)
-  t.limBad = Math.max(t.limBad, t.limWarn + 5)
+  return out
+}
+
+// The pairs that must stay apart: the lower limit, the upper one, and the least gap between them.
+const ORDER: [keyof Targets, keyof Targets, number][] = [
+  ['memGood', 'memFine', 200],
+  ['memFine', 'memBar', 0],
+  ['ctxWarn', 'ctxBad', 5],
+  ['limWarn', 'limBad', 5],
+]
+
+/** The limits in force: the saved ones over the defaults, then held in order (good < fine <= bar, warn < bad).
+ * Only what the person set is stored; a limit carried up by another is worked out here, so it comes back down with it. */
+export const targetsOf = (l: Layout): Targets => {
+  const t = { ...(Object.fromEntries(TARGETS.map(d => [d.id, d.value])) as Targets), ...savedTargets(l.targets) }
+  for (const [lo, hi, gap] of ORDER) t[hi] = Math.max(t[hi], t[lo] + gap)
   return t
 }
 
+/** Whether one step of a limit keeps it in its range and in order with the limits beside it. */
+export const canStep = (l: Layout, id: keyof Targets, by: 1 | -1): boolean => {
+  const d = TARGETS.find(x => x.id === id)
+  if (!d) return false
+  const t = targetsOf(l)
+  const v = t[id] + by * d.step
+  if (v < d.min || v > d.max) return false
+  for (const [lo, hi, gap] of ORDER) {
+    if (lo === id && by === 1 && v + gap > t[hi]) return false
+    if (hi === id && by === -1 && v < t[lo] + gap) return false
+  }
+  return true
+}
+
 // Only the limits that differ from the defaults are kept, so a later change of a default reaches everyone who left it.
-const changedTargets = (t: Targets) => {
+const changedTargets = (saved: Partial<Targets>) => {
   const out: Partial<Targets> = {}
-  for (const d of TARGETS) if (t[d.id] !== d.value) out[d.id] = t[d.id]
+  for (const d of TARGETS) if (saved[d.id] !== undefined && saved[d.id] !== d.value) out[d.id] = saved[d.id]
   return Object.keys(out).length > 0 ? { targets: out } : {}
 }
 
@@ -320,7 +347,7 @@ export const cleanLayout = (raw: unknown): Layout => {
     hidden: [...new Set(ids(r.hidden))],
     ...(r.hideCacheBar === true ? { hideCacheBar: true } : {}),
     ...(typeof r.theme === 'string' && r.theme in THEMES ? { theme: r.theme } : {}),
-    ...changedTargets(targetsOf({ order: [], hidden: [], targets: typeof r.targets === 'object' && r.targets !== null ? (r.targets as Partial<Targets>) : undefined })),
+    ...changedTargets(savedTargets(r.targets)),
   }
 }
 
@@ -335,10 +362,9 @@ export const applyLayoutMessage = (l: Layout, data: unknown): Layout => {
   const tg = d.target as { id?: unknown; by?: unknown } | undefined
   const def = TARGETS.find(x => x.id === tg?.id)
   if (def && (tg?.by === 1 || tg?.by === -1)) {
+    if (!canStep(l, def.id, tg.by)) return l
     const { targets: _, ...rest } = l
-    const t = targetsOf(l)
-    t[def.id] = Math.max(def.min, Math.min(def.max, t[def.id] + tg.by * def.step))
-    return { ...rest, ...changedTargets(targetsOf({ ...rest, targets: t })) }
+    return { ...rest, ...changedTargets({ ...savedTargets(l.targets), [def.id]: targetsOf(l)[def.id] + tg.by * def.step }) }
   }
   if (d.flag === 'cacheBar') {
     const { hideCacheBar, ...rest } = l

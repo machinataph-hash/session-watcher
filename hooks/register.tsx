@@ -20,6 +20,7 @@ import {
   applyLayoutMessage,
   cleanLayout,
   defaultLayout,
+  canStep,
   TARGETS,
   targetsOf,
   emptyLimitModel,
@@ -946,11 +947,11 @@ export const register: Register = on => {
                       <Box width={27} flexShrink={0}>
                         <Text dimColor wrap="truncate-end">{d.label}</Text>
                       </Box>
-                      <Box width={2} flexShrink={0}>{pressable(`tg-${d.id}-dn`, [{ text: '−', bold: true }], () => setLayout({ target: { id: d.id, by: -1 } }))}</Box>
+                      <Box width={2} flexShrink={0}>{pressable(`tg-${d.id}-dn`, [{ text: '−', bold: canStep(lay, d.id, -1), dim: !canStep(lay, d.id, -1) }], () => setLayout({ target: { id: d.id, by: -1 } }))}</Box>
                       <Box width={7} flexShrink={0} justifyContent="flex-end">
                         <Text tabular bold={tg[d.id] !== d.value} color={tg[d.id] !== d.value ? 'claude' : undefined}>{tg[d.id].toLocaleString('en-US')}</Text>
                       </Box>
-                      <Box width={2} flexShrink={0}>{pressable(`tg-${d.id}-up`, [{ text: '+', bold: true }], () => setLayout({ target: { id: d.id, by: 1 } }))}</Box>
+                      <Box width={2} flexShrink={0}>{pressable(`tg-${d.id}-up`, [{ text: '+', bold: canStep(lay, d.id, 1), dim: !canStep(lay, d.id, 1) }], () => setLayout({ target: { id: d.id, by: 1 } }))}</Box>
                     </Box>
                   ))}
                 </Box>
