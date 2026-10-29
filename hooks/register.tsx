@@ -741,7 +741,9 @@ export const register: Register = on => {
 
     const isOpen = (id: string) => open.includes(id)
     const flip = (id: string) => update($, sections, l => (l.includes(id) ? l.filter(x => x !== id) : [...l, id]))
-    // w: drawn in the monospaced face, so ■ and □ (one glyph family, drawn in the monospaced face) take the same room.
+    // w: drawn in the monospaced face take the same room.
+    // A tick box: the same character both ways (its size cannot differ); on is bold and bright, off dim.
+    const tickRun = (isOn: boolean): R => ({ text: '■', color: isOn ? 'claude' : undefined, dim: !isOn, bold: isOn, w: 1 })
     type R = { text: string; color?: string; dim?: boolean; bold?: boolean; size?: string; w?: number }
     // A clickable title. With no theme, the surface's own Button. Under a theme on a surface with Clients (not desktop),
     // its own one-line surface in the theme's colours, since a desktop Button keeps the app's ink.
@@ -783,7 +785,7 @@ export const register: Register = on => {
         <Box key={`ticks-${card}`} flexDirection="column" paddingLeft={1}>
           {defs.map(d => {
             const isOn = ex[d.key] ?? d.isOn
-            return pressable(`x-${card}-${d.key}`, [{ text: isOn ? '■' : '□', color: isOn ? 'claude' : undefined, dim: !isOn, w: 3 }, { text: `  ${d.label}`, dim: !isOn }], () => setLayout({ extra: { card, key: d.key } }))
+            return pressable(`x-${card}-${d.key}`, [tickRun(isOn), { text: `  ${d.label}`, dim: !isOn }], () => setLayout({ extra: { card, key: d.key } }))
           })}
         </Box>
       )
@@ -795,50 +797,56 @@ export const register: Register = on => {
       </Box>
     )
 
-    // A card's settings menu, the same for every card: a divider directly above and below its items.
-    const menu = (key: string, items: unknown[]) => (
-      <Box key={key} flexDirection="column" gap={1}>
-        {rule('sep-top')}
-        {items as never}
-        {rule('sep-bottom')}
+    // THE CARD TEMPLATE. Every card, Main included, is drawn here, so none can differ:
+    //  - title row: arrow and name left; summary and the ⚙ (one size on every card) right.
+    //  - settings closed: the title row, then the body. No line between them.
+    //  - settings open: title row, ONE divider, the menu items, ONE divider, then the body. Exactly two dividers,
+    //    the same weight and colour everywhere; nothing else inside a card draws a line of its own.
+    //  - menu headings use heading(); tick rows sit at one indent (paddingLeft 1) on every card.
+    const card = (key: string, o: { title: unknown; summary?: string; cogKey?: string; isMenuOpen: boolean; onCog?: () => void; items?: unknown[]; body?: () => unknown; isOpen: boolean }) => (
+      <Box key={key} {...CARD} gap={o.isOpen || o.isMenuOpen ? 1 : 0}>
+        <Box key="head" flexDirection="row" gap={1} alignItems="center">
+          <Box flexGrow={1} flexShrink={1} minWidth={0}>{o.title as never}</Box>
+          {o.summary && (
+            <Box flexShrink={1} minWidth={0}>
+              <Text dimColor tabular wrap="truncate-end">{o.summary}</Text>
+            </Box>
+          )}
+          {o.cogKey && o.onCog && <Box key="cog" flexShrink={0}>{cog(o.cogKey, o.isMenuOpen, o.onCog)}</Box>}
+        </Box>
+        {o.isMenuOpen && (
+          <Box key="menu" flexDirection="column" gap={1}>
+            {rule('sep-top')}
+            {(o.items ?? []) as never}
+            {rule('sep-bottom')}
+          </Box>
+        )}
+        {o.isOpen && o.body && (
+          <Box key="body" flexDirection="column" gap={1}>
+            {o.body() as never}
+          </Box>
+        )}
       </Box>
     )
 
-    // One collapsible section: a header row that opens and closes it, a one-line summary while closed,
-    // and a ⚙ for the card's own menu (its extras, and `more` below them).
+    // One collapsible section: the template with a title that opens and closes it and a ⚙ for its own menu
+    // (its extras, and `more` below them).
     const section = (id: string, title: string, summary: string, body: () => unknown, more?: () => unknown) => {
-      const o = isOpen(id)
       const hasMenu = (EXTRAS[id] ?? []).length > 0 || more !== undefined
-      const m = hasMenu && isOpen(`${MENU}${id}`)
-      return (
-        <Box key={id} {...CARD} gap={o || m ? 1 : 0}>
-          <Box key="head" flexDirection="row" gap={1} alignItems="center">
-            <Box flexGrow={1} flexShrink={1} minWidth={0}>
-              {pressable(`sec-${id}`, [{ text: o ? '▾ ' : '▸ ', dim: true }, { text: title, bold: true }], () => void flip(id))}
-            </Box>
-            {summary !== '' && (
-              <Box flexShrink={1} minWidth={0}>
-                <Text dimColor tabular wrap="truncate-end">
-                  {summary}
-                </Text>
-              </Box>
-            )}
-            {hasMenu && <Box key="cog" flexShrink={0}>{cog(`cfg-${id}`, m, () => void flip(`${MENU}${id}`))}</Box>}
-          </Box>
-          {m && (
-            menu('menu', [
-              (EXTRAS[id] ?? []).length > 0 && heading('mh', 'SHOW IN THIS CARD'),
-              (EXTRAS[id] ?? []).length > 0 && extraTicks(id),
-              more?.(),
-            ])
-          )}
-          {o && (
-            <Box key="body" flexDirection="column" gap={1}>
-              {body() as never}
-            </Box>
-          )}
-        </Box>
-      )
+      return card(id, {
+        title: pressable(`sec-${id}`, [{ text: isOpen(id) ? '▾ ' : '▸ ', dim: true }, { text: title, bold: true }], () => void flip(id)),
+        summary,
+        cogKey: hasMenu ? `cfg-${id}` : undefined,
+        onCog: () => void flip(`${MENU}${id}`),
+        isMenuOpen: hasMenu && isOpen(`${MENU}${id}`),
+        items: [
+          (EXTRAS[id] ?? []).length > 0 && heading('mh', 'SHOW IN THIS CARD'),
+          (EXTRAS[id] ?? []).length > 0 && extraTicks(id),
+          more?.(),
+        ],
+        isOpen: isOpen(id),
+        body,
+      })
     }
 
     // One row when wide: the columns spread edge to edge, the last one ending at the right edge.
@@ -925,16 +933,19 @@ export const register: Register = on => {
     ) : (
       <Box key="chips" flexDirection="column">
         {chipItems.map((it, i) => (
-          <Box key={it.id} flexDirection="row" gap={1}>
-            {i > 0 ? (
-              <Button key={`up-${it.id}`} plain onPress={keep('up-' + it.id, () => setLayout({ move: { id: it.id, to: i - 1 } }))}>
-                <Text dimColor>↑</Text>
-              </Button>
-            ) : (
-              <Text key={`up-${it.id}`} dimColor> </Text>
-            )}
+          <Box key={it.id} flexDirection="row" paddingLeft={1}>
+            <Box key="up" width={3} flexShrink={0}>
+              {i > 0 ? (
+                <Button key={`up-${it.id}`} plain onPress={keep('up-' + it.id, () => setLayout({ move: { id: it.id, to: i - 1 } }))}>
+                  <Text dimColor>↑</Text>
+                </Button>
+              ) : (
+                <Text key={`up-${it.id}`}> </Text>
+              )}
+            </Box>
             <Button key={`chip-${it.id}`} plain onPress={keep('chip-' + it.id, () => setLayout({ toggle: it.id }))}>
-              <Text dimColor={!it.isShown}>{`${it.isShown ? '■' : '□'} ${it.title}`}</Text>
+              <Text color={it.isShown ? 'claude' : undefined} dimColor={!it.isShown} bold={it.isShown} mono>■</Text>
+              <Text dimColor={!it.isShown}>{`  ${it.title}`}</Text>
             </Button>
           </Box>
         ))}
@@ -987,25 +998,45 @@ export const register: Register = on => {
         {body as never}
       </Box>
     )
-    const vitalsCard = (
-      <Box key="vitals" {...CARD} gap={1}>
-        <Box key="title" flexDirection="row" flexWrap="wrap" columnGap={2} justifyContent="space-between">
-          <Box flexGrow={1} flexShrink={1} minWidth={0}>
-          {pressable('sec-vitals', [
-            { text: '● ', color: v.isRunning ? 'claude' : 'success', bold: true, size: 'heading' },
-            { text: v.model ? modelName(v.model) : 'Session', bold: true, size: 'heading' },
-            ...(v.effort ? [{ text: ` · ${v.effort}`, dim: true }] : []),
-            ...(v.mode ? [{ text: ` · ${v.mode}`, dim: true }] : []),
-          ], () => void flip(VITALS_FOLDED))}
-          </Box>
-          <Box key="status" flexDirection="row" gap={1} alignItems="center">
-            <Text dimColor tabular>
-              {v.isRunning ? 'working' : 'idle'}
-              {mainEx.ttft ? ` · first token ${v.ttftMs !== null ? dur(v.ttftMs) : '—'}` : ''}
-            </Text>
-            <Box key="cog" flexShrink={0}>{cog('settings', settingsOpen, () => void flip(SETTINGS_OPEN))}</Box>
-          </Box>
-        </Box>
+    const vitalsCard = card('vitals', {
+      title: pressable('sec-vitals', [
+        { text: '● ', color: v.isRunning ? 'claude' : 'success', bold: true, size: 'heading' },
+        { text: v.model ? modelName(v.model) : 'Session', bold: true, size: 'heading' },
+        ...(v.effort ? [{ text: ` · ${v.effort}`, dim: true }] : []),
+        ...(v.mode ? [{ text: ` · ${v.mode}`, dim: true }] : []),
+      ], () => void flip(VITALS_FOLDED)),
+      summary: `${v.isRunning ? 'working' : 'idle'}${mainEx.ttft ? ` · first token ${v.ttftMs !== null ? dur(v.ttftMs) : '—'}` : ''}`,
+      cogKey: 'settings',
+      onCog: () => void flip(SETTINGS_OPEN),
+      isMenuOpen: settingsOpen,
+      items: [
+            <Box key="all" flexDirection="row">
+              <Button key="toggle-all" label={allOpen ? 'Collapse all' : 'Open all'} onPress={keep('toggle-all', () => void toggleAll())} />
+            </Box>,
+            // Labelled groups, each a fixed share of the row: two side by side when wide, stacked when narrow.
+            <Box key="cols" flexDirection="row" flexWrap="wrap" columnGap={2} rowGap={1}>
+              {group('cards', 'CARDS', 'Tick to show, drag to move. Each card has its own ⚙ for its extras.', chips)}
+              {group('main-extras', 'MAIN CARD', 'Extras shown in this card.', extraTicks('vitals'))}
+              {group('sample', 'SAMPLE DATA', 'Fill empty cards with labelled sample values.', (
+                <Box key="sample-list" flexDirection="column" paddingLeft={1}>
+                  {pressable('sample-data', [tickRun(isSample), { text: '  Sample data', dim: !isSample }], () => setLayout({ sample: true }))}
+                </Box>
+              ))}
+              {group('themes', 'THEME', 'Colours for the whole pane.', Client ? (
+                <Client key={`${TICKS}-theme`} module="./chips.tsx" props={{ isFixed: true, items: themeChoices.map(o => ({ id: `theme:${o.id}`, title: o.name, isShown: (lay.theme ?? 'app') === o.id })), ...palette }} height={themeChoices.length} />
+              ) : (
+                <Box key="theme-list" flexDirection="column" paddingLeft={1}>
+                  {themeChoices.map(o => {
+                    const isOn = (lay.theme ?? 'app') === o.id
+                    return pressable(`theme-${o.id}`, [tickRun(isOn), { text: ` ${o.name}`, bold: isOn, dim: !isOn }], () => setLayout({ theme: o.id === 'app' ? null : o.id }))
+                  })}
+                </Box>
+              ))}
+            </Box>,
+      ],
+      isOpen: true,
+      body: () => (
+        <Box key="main-body" flexDirection="column" gap={1}>
         <Box key="ctx" flexDirection="column">
           <Box key="h" flexDirection="row" justifyContent="space-between">
             {heading('l', `CONTEXT${v.compactions > 0 ? ` · ⟲ ${v.compactions} compacted` : ''}`)}
@@ -1047,35 +1078,9 @@ export const register: Register = on => {
             </Box>
           </Box>
         )}
-        {settingsOpen && (
-          menu('settings-body', [
-            <Box key="all" flexDirection="row">
-              <Button key="toggle-all" label={allOpen ? 'Collapse all' : 'Open all'} onPress={keep('toggle-all', () => void toggleAll())} />
-            </Box>,
-            // Labelled groups, each a fixed share of the row: two side by side when wide, stacked when narrow.
-            <Box key="cols" flexDirection="row" flexWrap="wrap" columnGap={2} rowGap={1}>
-              {group('cards', 'CARDS', 'Tick to show, drag to move. Each card has its own ⚙ for its extras.', chips)}
-              {group('main-extras', 'MAIN CARD', 'Extras shown in this card.', extraTicks('vitals'))}
-              {group('sample', 'SAMPLE DATA', 'Fill empty cards with labelled sample values.', (
-                <Box key="sample-list" flexDirection="column" paddingLeft={1}>
-                  {pressable('sample-data', [{ text: isSample ? '■' : '□', color: isSample ? 'claude' : undefined, dim: !isSample, w: 3 }, { text: '  Sample data', dim: !isSample }], () => setLayout({ sample: true }))}
-                </Box>
-              ))}
-              {group('themes', 'THEME', 'Colours for the whole pane.', Client ? (
-                <Client key={`${TICKS}-theme`} module="./chips.tsx" props={{ isFixed: true, items: themeChoices.map(o => ({ id: `theme:${o.id}`, title: o.name, isShown: (lay.theme ?? 'app') === o.id })), ...palette }} height={themeChoices.length} />
-              ) : (
-                <Box key="theme-list" flexDirection="column" paddingLeft={1}>
-                  {themeChoices.map(o => {
-                    const isOn = (lay.theme ?? 'app') === o.id
-                    return pressable(`theme-${o.id}`, [{ text: isOn ? '■' : '□', dim: !isOn, w: 3 }, { text: ` ${o.name}`, bold: isOn, dim: !isOn }], () => setLayout({ theme: o.id === 'app' ? null : o.id }))
-                  })}
-                </Box>
-              ))}
-            </Box>,
-          ])
-        )}
-      </Box>
-    )
+        </Box>
+      ),
+    })
 
     // ---- token kinds: one row per kind; the bar and COST are its share of the cost (or its dollars, given `dollars`),
     // then, with `withTokens`, its tokens and their share

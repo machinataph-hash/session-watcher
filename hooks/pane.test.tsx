@@ -2,6 +2,20 @@ import { expect, mock, test } from 'claude-code/testing'
 import Chips from './chips'
 import { EXTRAS, applyLayoutMessage, extrasOf, breakdownText, canStep, cleanLayout, defaultLayout, targetsOf, emptyLimitModel, estimateLimit, fromModel, paint, THEMES, stepLimitModel, usdOf, weighted } from './core'
 
+// The first Text a Button draws is its tick glyph; on is bold.
+type N = { type?: string; props?: Record<string, unknown>; children?: unknown[] } | undefined
+const firstText = (n: unknown): N => {
+  const x = n as N
+  if (!x || typeof x !== 'object') return undefined
+  if (x.type === 'Text') return x
+  for (const c of x.children ?? []) {
+    const r = firstText(c)
+    if (r) return r
+  }
+  return undefined
+}
+const glyphOn = (n: unknown) => firstText(n)?.props?.bold === true
+const glyphText = (n: unknown) => String(firstText(n)?.children?.[0])
 const pane = { title: '', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} } as const
 const usage = { model: 'claude-opus-5-5', input_tokens: 1000, output_tokens: 2000, cache_read_input_tokens: 100000, cache_creation_input_tokens: 4000 }
 type Eng = Parameters<Extract<Parameters<typeof test>[1], (...a: never[]) => unknown>>[0]
@@ -312,7 +326,7 @@ test('desktop: a theme pick chooses a theme, and a Main extra flips', async ($, 
   await ui.press({ key: 'settings' })
   // No Client on desktop: each choice is a Button, ticked when its box reads ■.
   expect(await ui.findAll({ type: 'Client' })).toHaveLength(0)
-  const ticked = async (key: string) => JSON.stringify(await ui.find({ key })).includes('■')
+  const ticked = async (key: string) => glyphOn(await ui.find({ key }))
   expect(await ticked('theme-app')).toBe(true)
   expect(await ticked('theme-reader')).toBe(false)
   await ui.press({ key: 'theme-reader' })
@@ -621,7 +635,7 @@ test('desktop: Sample data tick fills empty cards and is saved', async ($, on) =
   await ui.press({ key: 'sample-data' })
   expect(await ui.find({ type: 'Text', text: /SAMPLE DATA is on/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^5-hour limit$/ })).toBeDefined()
-  expect(JSON.stringify(await ui.find({ key: 'sample-data' }))).toContain('■')
+  expect(glyphOn(await ui.find({ key: 'sample-data' }))).toBe(true)
   expect(applyLayoutMessage(defaultLayout(), { sample: true }).sample).toBe(true)
   expect(cleanLayout({ sample: true }).sample).toBe(true)
   expect(cleanLayout({}).sample).toBeUndefined()
@@ -649,20 +663,21 @@ test('desktop: Main gear in its title row; Open all / Collapse all opens and clo
   mock.store(on)
   await start($, on)
   const ui = await mount($, 'desktop')
-  const title = JSON.stringify(await ui.find({ key: 'title' }))
+  const title = JSON.stringify(await ui.find({ key: 'head' }))
   expect(title).toContain('"settings"')
   await ui.press({ key: 'settings' })
-  const settings = JSON.stringify(await ui.find({ key: 'settings-body' }))
+  const settings = JSON.stringify(await ui.find({ key: 'menu' }))
   expect(settings.indexOf('sep-top')).toBeGreaterThan(-1)
   expect(settings.indexOf('sep-bottom')).toBeGreaterThan(settings.indexOf('theme-app'))
   expect(settings).toContain('Open all')
   await ui.press({ key: 'toggle-all' })
-  expect(JSON.stringify(await ui.find({ key: 'settings-body' }))).toContain('Collapse all')
+  expect(JSON.stringify(await ui.find({ key: 'menu' }))).toContain('Collapse all')
   for (const id of Object.keys(EXTRAS)) expect(await ui.find({ key: 'menu' })).toBeDefined()
   expect(await ui.find({ key: 'cfg-turn' })).toBeDefined()
   await ui.press({ key: 'toggle-all' })
-  expect(await ui.find({ key: 'menu' })).toBeUndefined()
-  expect(JSON.stringify(await ui.find({ key: 'settings-body' }))).toContain('Open all')
+  // Only Main's own menu (the one holding the Button) stays.
+  expect(await ui.findAll({ key: 'menu' })).toHaveLength(1)
+  expect(JSON.stringify(await ui.find({ key: 'menu' }))).toContain('Open all')
 })
 
 // Permissions: fixed column widths at narrow and wide panes.
@@ -687,14 +702,17 @@ test(`desktop: tick labels are the same length checked or not, theme ${theme ?? 
   await start($, on)
   const ui = await mount($, 'desktop')
   await ui.press({ key: 'settings' })
-  const box = (s: string) => /[■□]/.exec(s)?.[0]
-  const a = JSON.stringify(await ui.find({ key: 'x-vitals-active' }))
+  const node = async () => await ui.find({ key: 'x-vitals-active' })
+  const a0 = await node()
   await ui.press({ key: 'x-vitals-active' })
-  const b = JSON.stringify(await ui.find({ key: 'x-vitals-active' }))
-  expect(box(a)).toBe('□')
-  expect(box(b)).toBe('■')
-  expect(box(a)!.length).toBe(box(b)!.length)
-  expect(a).not.toMatch(/[☑☐]/)
+  const b0 = await node()
+  // The same character both ways; only the ink differs (on is bold).
+  expect(glyphText(a0)).toBe('■')
+  expect(glyphText(b0)).toBe('■')
+  expect(glyphOn(a0)).toBe(false)
+  expect(glyphOn(b0)).toBe(true)
+  const a = JSON.stringify(a0)
+  expect(a).not.toMatch(/[☑☐□]/)
 })
 
 // Main settings: the move-up arrow sits left of each tick; Session Totals explains the cost gap with the real scan time.
@@ -709,4 +727,39 @@ test('desktop: up arrow left of the tick; Session Totals cost note and as-of tim
   expect(row.indexOf('up-tasks')).toBeLessThan(row.indexOf('chip-tasks'))
   await ui.press({ key: 'cfg-session' })
   expect(await ui.find({ type: 'Text', text: /Main card shows the live cost\. This card shows the cost from the last log scan \(as of .*\), which splits/ })).toBeDefined()
+})
+
+// The card template: closed settings draw no divider; open settings draw exactly two; ticks share one indent;
+// the Cards list rows share one arrow column.
+for (const cols of [30, 120])
+test(`desktop: every card draws 0 dividers closed and exactly 2 open, at ${cols} columns`, async ($, on) => {
+  mock.clock(on)
+  mock.store(on, { layout: { order: ['session', 'tasks', 'requests', 'agents', 'gate', 'cache', 'turn', 'log'], hidden: [], sample: true } })
+  await start($, on)
+  const ui = await $.ui.mount({ plugin: 'session-watcher', surface: 'desktop', component: 'Pane', requestId: 'session-watcher', props: { ...pane, bodyColumns: cols } })
+  const rules = (n: unknown): number => {
+    const x = n as N
+    if (!x || typeof x !== 'object') return 0
+    const own = x.type === 'Text' && /^─{50,}/.test(String(x.children?.[0])) ? 1 : 0
+    return own + (x.children ?? []).reduce((a: number, c) => a + rules(c), 0)
+  }
+  const ids = ['vitals', ...Object.keys(EXTRAS).filter(id => id !== 'vitals')]
+  for (const id of ids) {
+    const gear = id === 'vitals' ? 'settings' : `cfg-${id}`
+    const card = () => ui.find({ key: id === 'vitals' ? 'vitals' : id, type: 'Box' })
+    expect(rules(await card())).toBe(0)
+    await ui.press({ key: gear })
+    const open = (await ui.findAll({ key: id })).find(n => JSON.stringify(n).includes('sep-top'))
+    expect(rules(open)).toBe(2)
+    if (id !== 'vitals') expect((await ui.find({ key: `ticks-${id}` }))?.props?.paddingLeft).toBe(1)
+    await ui.press({ key: gear })
+    expect(rules(await card())).toBe(0)
+  }
+  await ui.press({ key: 'settings' })
+  expect((await ui.find({ key: 'ticks-vitals' }))?.props?.paddingLeft).toBe(1)
+  for (const id of ['session', 'tasks', 'requests', 'agents', 'gate', 'cache', 'turn', 'log']) {
+    const row = (await ui.findAll({ key: id })).find(n => JSON.stringify(n).includes(`chip-${id}`))
+    expect(row?.props?.paddingLeft).toBe(1)
+    expect((row?.children?.[0] as N)?.props?.width).toBe(3)
+  }
 })
