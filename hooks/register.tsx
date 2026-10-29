@@ -593,7 +593,6 @@ export const register: Register = on => {
     const v: Vitals = { ...DEFAULT_VITALS, ...v0, limits: v0?.limits ?? [] }
     const startedAt = sessionStart ?? list[0]?.startedAt ?? now
     // The factor comes from one snapshot: the transcript read and the engine's cost at that moment.
-    const factor = factorOf(sc)
     const isCalibrated = (sc.costUsd ?? null) !== null && scanTotal(sc).usd > 0
     const cols = Math.max(28, e.props.bodyColumns || 60)
     // Inside a section: its border and one cell of padding on each side.
@@ -833,10 +832,17 @@ export const register: Register = on => {
     const snapCost = hasScan && sc.costUsd != null ? sc.costUsd : (v.costUsd ?? total.usd)
     // The live cost is ahead of the snapshot while a turn runs (or until the next read lands).
     const isUpdating = v.isRunning || (v.costUsd !== null && hasScan && Math.abs(v.costUsd - snapCost) > 0.005)
+    // Every row is scaled by the shown total over the rows' list-price sum, so the rows add up to TOTAL even when
+    // the engine's cost was not read with the transcript.
+    const f0 = total.usd > 0 ? snapCost / total.usd : 1
+    const factor = Number.isFinite(f0) && f0 > 0 ? f0 : 1
     const perReq = (cost: number, n: number) => (n > 0 ? usd(cost / n) : '—')
     // Main thread and sub-agents, from the same snapshot.
     const mainU = Object.values(sc.byModel).reduce((acc, x) => sum(acc, x.main), empty())
     const agentU = Object.values(sc.byModel).reduce((acc, x) => sum(acc, x.agents), empty())
+    // The agents' figure is what is left of the total, so the two shown parts add up to it exactly.
+    const mainCost = mainU.usd * factor
+    const agentCost = hasScan ? Math.max(0, snapCost - mainCost) : agentU.usd * factor
     // One count of sub-agents: every one this session, known from the tasks (all kept) and the live cards.
     const agentIds = new Set([...list.flatMap(t => t.agents.map(a => a.id)), ...cards.map(c => c.id)])
     const agentCount = agentIds.size
@@ -964,7 +970,7 @@ export const register: Register = on => {
           ...(mainEx.active ? [stat('act', 'ACTIVE', clock(actMs), { sub: `${runFor > 0 ? Math.round((100 * actMs) / runFor) : 0}% of the time` })] : []),
           stat('calls', 'REQUESTS', String(total.calls)),
           // Cost and requests from the same snapshot, so the quotient is of one moment.
-          stat('cpr', 'COST / REQUEST', perReq(snapCost, total.calls)),
+          stat('cpr', isUpdating ? 'COST / REQUEST · UPDATING' : 'COST / REQUEST', perReq(snapCost, total.calls), isUpdating && hasScan ? { sub: `as of ${hhmm(sc.at)}` } : {}),
         ])}
         {v.limits.length > 0 && (
           <Box key="limits" flexDirection="column">
@@ -1075,8 +1081,6 @@ export const register: Register = on => {
       .filter(r => r.u.calls > 0)
       .sort((a, b) => b.u.usd - a.u.usd)
     const sessEx = extrasOf(lay, 'session')
-    const mainCost = mainU.usd * factor
-    const agentCost = agentU.usd * factor
     const sessionBody = () => [
       // The total every row below adds up to: the snapshot's cost, marked while the live cost has moved past it.
       <Box key="tot" flexDirection="row" justifyContent="space-between">
@@ -1390,7 +1394,7 @@ export const register: Register = on => {
     const cacheEx = extrasOf(lay, 'cache')
     const cacheBody = () =>
       !ch
-        ? [<Text key="none" dimColor>{sc.at > 0 ? 'No cache data in the transcripts.' : 'Reading the transcripts…'}</Text>]
+        ? [<Text key="none" dimColor>{hasScan ? 'No cache data in the transcripts.' : 'Reading the transcripts…'}</Text>]
         : [
             stats('c', [
               stat('h', 'CACHE HIT RATE', hitRate !== null ? `${Math.round(100 * hitRate)}%` : '—', { color: 'claude', sub: 'input read from the cache', w: stat3 }),

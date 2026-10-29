@@ -546,3 +546,18 @@ test('session totals: parts from one snapshot add up to the shown total; Main ha
   expect(await ui.find({ type: 'Text', text: /main \$2\.00 · agents \$1\.00/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^\$3\.00$/ })).toBeDefined()
 })
+
+// Without the engine's cost read alongside the transcript, the parts still add up to the TOTAL shown.
+test('session totals: with no cost in the snapshot, the parts still add up to the shown total', async ($, on) => {
+  mock.clock(on)
+  const u = (calls: number, inp: number) => ({ input: inp, cacheWrite: 0, cacheRead: 0, output: 0, calls, usd: 0 })
+  on('session.id', async () => ({ value: 'sid' }) as never)
+  on('session.usage', async () => ({ value: { startedAt: 0, context: { window: 1000 }, rateLimits: [], cost: null } }) as never)
+  on('process.run', async () => ({ value: { exitCode: 0, stdout: JSON.stringify({ ms: 0, byModel: { 'claude-opus-5-5': { main: u(2, 2e6), agents: u(1, 1e6) } } }), stderr: '' } }) as never)
+  await start($, on)
+  for (let i = 0; i < 200; i++) await Promise.resolve()
+  const ui = await mount($, 'terminal', 80)
+  // List price: $10 main + $5 agents = $15, shown as the total.
+  expect(await ui.find({ type: 'Text', text: /main \$10\.00 · agents \$5\.00/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^\$15\.00$/ })).toBeDefined()
+})
