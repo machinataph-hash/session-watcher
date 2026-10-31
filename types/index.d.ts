@@ -108,6 +108,8 @@ declare module 'claude-code' {
       layout: Layout
       taskToggles: number[]
       copied: string
+      /** the live page's refresh rate in seconds, mirrored for the Main card's stepper */
+      liveEvery: number
     }
   }
 }

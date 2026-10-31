@@ -249,13 +249,17 @@ const callsCsv = (list: Call[], factor: number) =>
 type LiveCfg = { on: boolean; everyS: number }
 const LIVE = 'live'
 const LIVE_DEFAULT: LiveCfg = { on: true, everyS: 10 }
+// The refresh rate is a preference: `/session-watcher live <seconds>` or the Main card's ⚙ steps it, 1 to 60 seconds.
+const LIVE_MIN_S = 1
+const LIVE_MAX_S = 60
+const liveEvery = atom({ plugin: 'session-watcher', key: 'liveEvery' } as const, 10)
 const live = { cfg: LIVE_DEFAULT, last: 0, timer: null as { cancel: () => void } | null, isBusy: false, isDirty: false, path: '', url: '' }
 const isLiveCall = (tool: string, input: unknown) => tool === 'Artifact' && live.path !== '' && (input as { file_path?: unknown } | null)?.file_path === live.path
 
 const liveSnapshot = async ($: EngineInterface) => {
   const [t, c, a, s, v, ag, g, r, l, lay] = await Promise.all([read($, tasks), read($, calls), read($, active), read($, scan), read($, vitals), read($, agents), read($, gate), read($, receipt), read($, log), read($, layout)])
   const now = await $.clock.now()
-  return { exportedAt: now, sessionStart: sessionStart ?? t[0]?.startedAt ?? now, tasks: t, calls: c.slice(-500), active: { ...a, ms: activeMs(a, now) - (a.hist ?? 0), since: null }, scan: s, vitals: v, agents: ag, gate: g, receipt: r, log: l, order: lay.order, hidden: lay.hidden }
+  return { exportedAt: now, sessionStart: sessionStart ?? t[0]?.startedAt ?? now, tasks: t, calls: c.slice(-500), active: { ...a, ms: activeMs(a, now) - (a.hist ?? 0), since: null }, scan: s, vitals: v, agents: ag, gate: g, receipt: r, log: l, order: lay.order, hidden: lay.hidden, liveEveryS: live.cfg.everyS }
 }
 
 const publishLive = async ($: EngineInterface) => {
@@ -313,6 +317,14 @@ const scheduleLive = ($: EngineInterface, isNow = false) => {
   })
 }
 
+// One step of the refresh rate from the Main card's ⚙: kept, mirrored for the stepper, and used from the next request.
+const stepLive = async ($: EngineInterface, by: 1 | -1) => {
+  const everyS = Math.max(LIVE_MIN_S, Math.min(LIVE_MAX_S, live.cfg.everyS + by))
+  live.cfg = { ...live.cfg, everyS }
+  await $.store.set(LIVE, live.cfg).catch(() => undefined)
+  await update($, liveEvery, () => everyS)
+}
+
 // Each observing hook ends in .catch: if its own bookkeeping fails, the event passes on unchanged.
 export const register: Register = on => {
   // tool.check carries no agent id; the tool.call around it does.
@@ -340,6 +352,7 @@ export const register: Register = on => {
     if (saved !== undefined) await update($, layout, () => cleanLayout(saved))
     const liveSaved = (await $.store.get(LIVE).catch(() => undefined)) as Partial<LiveCfg> | undefined
     live.cfg = { ...LIVE_DEFAULT, ...(liveSaved ?? {}) }
+    await update($, liveEvery, () => live.cfg.everyS)
     await readUsage($, true)
     void readTranscript($)
     if (!ticking) {
@@ -401,8 +414,9 @@ export const register: Register = on => {
     }
     if (verb === 'live') {
       const s = Number(arg)
-      live.cfg = arg === 'off' ? { ...live.cfg, on: false } : arg === 'on' || arg === '' ? { ...live.cfg, on: true } : Number.isFinite(s) && s >= 5 ? { on: true, everyS: Math.round(s) } : live.cfg
+      live.cfg = arg === 'off' ? { ...live.cfg, on: false } : arg === 'on' || arg === '' ? { ...live.cfg, on: true } : Number.isFinite(s) && s >= LIVE_MIN_S && s <= LIVE_MAX_S ? { on: true, everyS: Math.round(s) } : live.cfg
       await $.store.set(LIVE, live.cfg).catch(() => undefined)
+      await update($, liveEvery, () => live.cfg.everyS)
       if (live.cfg.on) scheduleLive($, true)
       return { text: live.cfg.on ? `Live page on: published after each request, at most every ${live.cfg.everyS}s.${live.url ? ` ${live.url}` : ''}` : 'Live page off. /session-watcher report publishes once.' }
     }
@@ -693,6 +707,7 @@ export const register: Register = on => {
       read($, layout),
     ])
     const lay = cleanLayout(lay0)
+    const everyS = await read($, liveEvery)
     // The limits the bars are coloured by, as set in settings.
     const tg = targetsOf(lay)
     const now = await $.clock.now()
@@ -1213,6 +1228,13 @@ export const register: Register = on => {
             grid('cols', [
               group('cards', 'CARDS', 'Tick to show, drag to move. Each card has its own ⚙ for its extras.', chips),
               group('main-extras', 'MAIN CARD', 'Extras shown in this card.', extraTicks('vitals')),
+              group('refresh', 'LIVE PAGE REFRESH', 'A preference: the page publishes at most this often. 10s by default.', (
+                <Box key="refresh-row" flexDirection="row" gap={1} alignItems="center" paddingLeft={INDENT}>
+                  <Box width={2} flexShrink={0}>{pressable('live-dn', [{ text: '−', bold: everyS > LIVE_MIN_S, dim: everyS <= LIVE_MIN_S }], () => void stepLive($, -1))}</Box>
+                  <Text tabular bold color={everyS !== LIVE_DEFAULT.everyS ? 'claude' : undefined}>{`${everyS}s`}</Text>
+                  <Box width={2} flexShrink={0}>{pressable('live-up', [{ text: '+', bold: everyS < LIVE_MAX_S, dim: everyS >= LIVE_MAX_S }], () => void stepLive($, 1))}</Box>
+                </Box>
+              )),
               group('sample', 'SAMPLE DATA', 'Fill empty cards with labelled sample values.', (
                 <Box key="sample-list" flexDirection="column" paddingLeft={INDENT}>
                   {pressable('sample-data', [tickRun(isSample), { text: `${TICK_GAP}Sample data`, dim: !isSample }], () => setLayout({ sample: true }))}

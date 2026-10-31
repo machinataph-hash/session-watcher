@@ -64,7 +64,7 @@ button.btn:hover, button.p:hover { color: var(--claude); }
 <script>
 (() => {
 const S = JSON.parse(document.getElementById('state').textContent)
-const { k, usd, clock, dur, hhmm, when, untilReset, modelName, familyOf, weighted, writeCost, fresh, sum, empty, taskTotal, scanTotal, newTask, EXTRAS, SECTIONS, TARGETS, THEMES, BUCKETS } = SW
+const { k, usd, clock, dur, hhmm, when, untilReset, modelName, familyOf, weighted, writeCost, fresh, sum, empty, taskTotal, scanTotal, newTask, EXTRAS, SECTIONS, TARGETS, THEMES, BUCKETS, targetsOf, canStep, applyLayoutMessage } = SW
 const root = document.getElementById('sw')
 // Per-viewer settings, as the pane keeps them in $.state: open sections, layout (order, hidden, theme, extras).
 const KEY = 'session-watcher:v1'
@@ -78,7 +78,15 @@ const save = () => { try { localStorage.setItem(KEY, JSON.stringify({ open, lay,
 const isOpen = id => open.includes(id)
 const flip = id => { open = isOpen(id) ? open.filter(x => x !== id) : [...open, id]; save(); draw() }
 const extrasOf = card => Object.fromEntries((EXTRAS[card] || []).map(d => [d.key, (lay.cards[card] || {})[d.key] ?? d.isOn]))
-const tg = Object.fromEntries(TARGETS.map(d => [d.id, d.value]))
+// The limits the bars are coloured by: the defaults, or what this viewer set in the Cache card's ⚙.
+let tg = targetsOf(lay)
+const setLay = msg => { lay = { ...lay, ...applyLayoutMessage(lay, msg) }; tg = targetsOf(lay); save(); draw() }
+const targetSteppers = () => h('div', { class: 'col gap' }, heading('Targets · what the bars are coloured by'),
+  h('div', { class: 'col' }, TARGETS.map(d => h('div', { class: 'row' }, h('div', { class: 'grow trunc dim' }, d.label),
+    pressable([{ text: '−', bold: canStep(lay, d.id, -1), dim: !canStep(lay, d.id, -1) }], () => setLay({ target: { id: d.id, by: -1 } }), `Lower ${d.label}`),
+    cellW(9, T(tg[d.id].toLocaleString('en-US'), 'num b', tg[d.id] !== d.value ? 'claude' : undefined)),
+    pressable([{ text: '+', bold: canStep(lay, d.id, 1), dim: !canStep(lay, d.id, 1) }], () => setLay({ target: { id: d.id, by: 1 } }), `Raise ${d.label}`)))),
+  lay.targets ? pressable([{ text: '↺ Back to the defaults', dim: true }], () => setLay({ target: 'reset' })) : null)
 
 // ---- tiny element helper
 const h = (tag, attrs, ...kids) => {
@@ -231,6 +239,8 @@ function draw() {
       grid([
         group('Cards', 'Tick to show, ↑ to move. Each card has its own ⚙ for its extras.', chips),
         group('Main card', 'Extras shown in this card.', extraTicks('vitals')),
+        group('Refresh', 'A preference, 10s by default. The page cannot reach the mod, so set it in the pane’s ⚙ or with the command.', h('div', { class: 'col ind' },
+          T(`Every ${S.liveEveryS ?? 10}s`, 'num b'), T(`/session-watcher live <1–60>`, 'foot dim num'))),
         group('Theme', 'Colours for the whole page.', h('div', { class: 'col ind' }, themeChoices.map(o => {
           const on = (lay.theme ?? 'app') === o.id
           return pressable([tickRun(on), { text: `  ${o.name}`, dim: !on }], () => { lay.theme = o.id === 'app' ? undefined : o.id; save(); draw() })
@@ -363,7 +373,8 @@ function draw() {
   const cacheEx = extrasOf('cache')
   const cacheBody = () => !ch0 ? [T('No cache data in the transcripts.', 'dim')] : [
     stats([stat('Cache hit rate', hitRate !== null ? `${Math.round(100 * hitRate)}%` : '—', { color: 'claude', sub: 'input read from the cache' }), stat('Starting load', k(ch0.first), { sub: 'first request' }), stat('Rebuilds', String(ch0.rebuildCount), { sub: `${k(ch0.rebuildTokens)} written` })]),
-    ch0.memoryChars !== null && h('div', { class: 'col' }, labelValue('Memory index', `${ch0.memoryChars.toLocaleString('en-US')} / ${tg.memBar.toLocaleString('en-US')} chars`, { text: memWord, color: memColor }), barRow([{ value: Math.min(1, ch0.memoryChars / tg.memBar), color: memColor }])),
+    h('div', { class: 'col' }, labelValue('Memory index', ch0.memoryChars !== null ? `${ch0.memoryChars.toLocaleString('en-US')} / ${tg.memBar.toLocaleString('en-US')} chars` : 'none loaded', ch0.memoryChars !== null ? { text: memWord, color: memColor } : null), barRow([{ value: ch0.memoryChars !== null ? Math.min(1, ch0.memoryChars / tg.memBar) : 0, color: memColor }]),
+      T(`Good to ${tg.memGood.toLocaleString('en-US')} (target) · Fine to ${tg.memFine.toLocaleString('en-US')} · Bad past it`, 'foot dim')),
     cacheEx.rebuilds && h('div', { class: 'col' }, heading('Rebuilds · requests writing over 50k'), ch0.rebuilds.length === 0 ? T('None.', 'dim') : ch0.rebuilds.slice(-5).reverse().map(r => h('div', { class: 'row' }, cellW(NUM_W, T(hhmm(r.at), 'dim num'), false), h('div', { class: 'grow trunc' }, WHY[r.why] || r.why), cellW(NUM_W, n(k(r.tokens)))))),
     cacheEx.tools && h('div', { class: 'col' }, heading('Largest tool results · characters'), ch0.tools.length === 0 ? T('None yet.', 'dim') : ch0.tools.map(t => h('div', { class: 'row' }, h('div', { class: 'grow trunc' }, toolName(t.name)), cellW(NUM_W, n(k(t.chars)))))),
   ]
@@ -381,7 +392,7 @@ function draw() {
     requests: () => section('requests', 'Recent Requests', `${callList.length} seen`, requestsBody),
     agents: () => section('agents', 'Sub-Agents', agentCount === 0 ? 'none' : `${running} running`, agentsBody),
     gate: () => section('gate', 'Permissions', `${gt.allowed} ok · ${gt.asked} asked · ${gt.denied} denied`, gateBody),
-    cache: () => section('cache', 'Cache', hitRate !== null ? `${Math.round(100 * hitRate)}% hit${ch0 && ch0.memoryChars !== null ? ` · ${memWord}` : ''}` : '—', cacheBody),
+    cache: () => section('cache', 'Cache', hitRate !== null ? `${Math.round(100 * hitRate)}% hit${ch0 && ch0.memoryChars !== null ? ` · ${memWord}` : ''}` : '—', cacheBody, targetSteppers),
     turn: () => section('turn', 'Last Turn', rc ? `${dur(rc.durationMs)}${rc.costDelta !== null ? ` · +${usd(rc.costDelta * factor)}` : ''}` : '—', turnBody),
     log: () => section('log', 'Activity', errorsNow > 0 ? `${events.length} events · ${errorsNow} errors` : `${events.length} events`, logBody),
   }

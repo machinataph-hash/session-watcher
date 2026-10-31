@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 const d = import.meta.dirname
 const core = execFileSync('npx', ['-y', 'esbuild@0.24.0', '--bundle', '--format=iife', '--global-name=SW', '--minify', '--target=es2020', '--log-level=warning', '--tsconfig-raw={}'], {
-  input: "export { k, usd, clock, dur, hhmm, when, untilReset, modelName, familyOf, weighted, writeCost, fresh, sum, empty, taskTotal, scanTotal, newTask, EXTRAS, SECTIONS, TARGETS, THEMES, BUCKETS } from './hooks/core.ts'",
+  input: "export { k, usd, clock, dur, hhmm, when, untilReset, modelName, familyOf, weighted, writeCost, fresh, sum, empty, taskTotal, scanTotal, newTask, EXTRAS, SECTIONS, TARGETS, THEMES, BUCKETS, targetsOf, canStep, applyLayoutMessage } from './hooks/core.ts'",
   cwd: `${d}/..`,
 }).toString()
 writeFileSync(`${d}/page.html`, readFileSync(`${d}/page.src.html`, 'utf8').replace('__CORE__', () => core.replace(/<\/script/gi, '<\\/script')))
