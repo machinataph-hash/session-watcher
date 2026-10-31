@@ -249,9 +249,9 @@ const callsCsv = (list: Call[], factor: number) =>
 type LiveCfg = { on: boolean; everyS: number }
 const LIVE = 'live'
 const LIVE_DEFAULT: LiveCfg = { on: true, everyS: 10 }
-// The refresh rate is a preference: `/session-watcher live <seconds>` or the Main card's ⚙ steps it, 1 to 60 seconds.
-const LIVE_MIN_S = 1
-const LIVE_MAX_S = 60
+// The refresh rate is a preference: `/session-watcher live <seconds>` or the Main card's ⚙ steps it, 2 to 20 seconds.
+const LIVE_MIN_S = 2
+const LIVE_MAX_S = 20
 const liveEvery = atom({ plugin: 'session-watcher', key: 'liveEvery' } as const, 10)
 const live = { cfg: LIVE_DEFAULT, last: 0, timer: null as { cancel: () => void } | null, isBusy: false, isDirty: false, path: '', url: '' }
 const isLiveCall = (tool: string, input: unknown) => tool === 'Artifact' && live.path !== '' && (input as { file_path?: unknown } | null)?.file_path === live.path

@@ -240,7 +240,7 @@ function draw() {
         group('Cards', 'Tick to show, ↑ to move. Each card has its own ⚙ for its extras.', chips),
         group('Main card', 'Extras shown in this card.', extraTicks('vitals')),
         group('Refresh', 'A preference, 10s by default. The page cannot reach the mod, so set it in the pane’s ⚙ or with the command.', h('div', { class: 'col ind' },
-          T(`Every ${S.liveEveryS ?? 10}s`, 'num b'), T(`/session-watcher live <1–60>`, 'foot dim num'))),
+          T(`Every ${S.liveEveryS ?? 10}s`, 'num b'), T(`/session-watcher live <2–20>`, 'foot dim num'))),
         group('Theme', 'Colours for the whole page.', h('div', { class: 'col ind' }, themeChoices.map(o => {
           const on = (lay.theme ?? 'app') === o.id
           return pressable([tickRun(on), { text: `  ${o.name}`, dim: !on }], () => { lay.theme = o.id === 'app' ? undefined : o.id; save(); draw() })
