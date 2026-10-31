@@ -278,21 +278,21 @@ for (const surface of ['terminal', 'desktop'] as const)
     expect(await ui.find({ type: 'Text', text: /^CARDS$/ })).toBeUndefined()
     await ui.press({ key: 'settings' })
     expect(await ui.find({ type: 'Text', text: /^CARDS$/ })).toBeDefined()
-    // Untick Tasks (row 1): its section goes, its chip stays.
+    // Untick Tasks (row 3): its section goes, its chip stays.
     expect(await ui.find({ type: 'Text', text: /^Tasks$/ })).toBeDefined()
     const sections = async () => (await ui.findAll({ type: 'Button' })).map(b => (b as { key?: string }).key).filter(x => x?.startsWith('sec-') && x !== 'sec-vitals')
     if (surface === 'terminal') {
-      await ui.pointer({ type: 'down', x: 0, y: 1, button: 'left', in: 'section-chips' })
-      await ui.pointer({ type: 'up', x: 0, y: 1, button: 'left', in: 'section-chips' })
+      await ui.pointer({ type: 'down', x: 0, y: 3, button: 'left', in: 'section-chips' })
+      await ui.pointer({ type: 'up', x: 0, y: 3, button: 'left', in: 'section-chips' })
       expect(await ui.find({ key: 'sec-tasks' })).toBeUndefined()
       // A click on the title, not the box, ticks it too: it comes back, then goes again.
-      await ui.pointer({ type: 'down', x: 12, y: 1, button: 'left', in: 'section-chips' })
-      await ui.pointer({ type: 'up', x: 12, y: 1, button: 'left', in: 'section-chips' })
+      await ui.pointer({ type: 'down', x: 12, y: 3, button: 'left', in: 'section-chips' })
+      await ui.pointer({ type: 'up', x: 12, y: 3, button: 'left', in: 'section-chips' })
       expect(await ui.find({ key: 'sec-tasks' })).toBeDefined()
-      await ui.pointer({ type: 'down', x: 12, y: 1, button: 'left', in: 'section-chips' })
-      await ui.pointer({ type: 'up', x: 12, y: 1, button: 'left', in: 'section-chips' })
-      // Drag Activity (row 7) to the top.
-      await ui.pointer({ type: 'down', x: 6, y: 7, button: 'left', in: 'section-chips' })
+      await ui.pointer({ type: 'down', x: 12, y: 3, button: 'left', in: 'section-chips' })
+      await ui.pointer({ type: 'up', x: 12, y: 3, button: 'left', in: 'section-chips' })
+      // Drag Activity (row 5) to the top.
+      await ui.pointer({ type: 'down', x: 6, y: 5, button: 'left', in: 'section-chips' })
       await ui.pointer({ type: 'move', x: 6, y: 0, button: 'left', in: 'section-chips' })
       await ui.pointer({ type: 'up', x: 6, y: 0, button: 'left', in: 'section-chips' })
     } else {
@@ -343,7 +343,7 @@ test('desktop: a theme pick chooses a theme, and a Main extra flips', async ($, 
 
 test('a stored layout is cleaned: unknown ids dropped, new sections added last', () => {
   expect(cleanLayout({ order: ['log', 'nope', 'log', 'tasks'], hidden: ['x', 'gate'] })).toEqual({
-    order: ['log', 'tasks', 'session', 'requests', 'agents', 'gate', 'cache', 'turn'],
+    order: ['log', 'tasks', 'turn', 'session', 'requests', 'agents', 'cache', 'gate'],
     hidden: ['gate'],
   })
   expect(cleanLayout(null)).toEqual(defaultLayout())

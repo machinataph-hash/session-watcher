@@ -264,14 +264,14 @@ export const estimateLimit = (m: LimitModel, l: LimitReading): number | null => 
 
 // The pane's section layout: which sections show and in what order. Vitals is not in it; it always shows.
 export const SECTIONS: { id: string; title: string }[] = [
-  { id: 'session', title: 'Session Totals' },
-  { id: 'tasks', title: 'Tasks' },
-  { id: 'requests', title: 'Recent Requests' },
-  { id: 'agents', title: 'Sub-Agents' },
-  { id: 'gate', title: 'Permissions' },
-  { id: 'cache', title: 'Cache' },
   { id: 'turn', title: 'Last Turn' },
+  { id: 'session', title: 'Session Totals' },
+  { id: 'requests', title: 'Recent Requests' },
+  { id: 'tasks', title: 'Tasks' },
+  { id: 'agents', title: 'Sub-Agents' },
   { id: 'log', title: 'Activity' },
+  { id: 'cache', title: 'Cache' },
+  { id: 'gate', title: 'Permissions' },
 ]
 const SECTION_IDS = SECTIONS.map(s => s.id)
 export const defaultLayout = (): Layout => ({ order: [...SECTION_IDS], hidden: [] })
