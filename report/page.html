@@ -44,6 +44,7 @@ button.p { all: unset; cursor: pointer; display: inline-flex; gap: 0; align-item
 button.p:focus-visible, button.btn:focus-visible { outline: 2px solid var(--claude); outline-offset: 2px; }
 button.btn { font: inherit; color: var(--fg); background: transparent; border: 1px solid var(--border); border-radius: 5px; padding: 2px 10px; cursor: pointer; }
 button.btn:hover, button.p:hover { color: var(--claude); }
+.tick { font-size: 1.2em; line-height: 1; }
 .cog { font-size: 16px; line-height: 1; font-weight: 700; }
 .bar { height: 8px; border-radius: 4px; background: var(--track); overflow: hidden; display: flex; flex: 1 1 0; min-width: 0; }
 .bar > i { display: block; height: 100%; }
@@ -132,7 +133,8 @@ const grid = (items0, min, cols) => {
   for (let i = 0; i < items.length; i += per) rows.push(items.slice(i, i + per))
   return h('div', { class: 'col gap' }, rows.map(r => h('div', { class: 'gridrow' }, [...r, ...Array(per - r.length).fill(null)].map(it => h('div', {}, it)))))
 }
-const stat = (label, value, o = {}) => h('div', { class: 'col' }, heading(label), T(value, 'big', o.color), o.sub ? T(o.sub, 'foot dim num trunc') : null)
+// o.since: a clock the page itself keeps running from that time, so it moves between publishes.
+const stat = (label, value, o = {}) => h('div', { class: 'col' }, heading(label), o.since ? h('span', { class: 'big', 'data-since': o.since }, value) : T(value, 'big', o.color), o.sub ? T(o.sub, 'foot dim num trunc') : null)
 const stats = (items, cols) => grid(items, STAT_MIN, cols)
 // DESIGN 7: one column list for header and rows; free column grows; numbers 8 wide, right-aligned; stacks when narrow.
 const table = (cols0, rows, room = inner, after) => {
@@ -149,7 +151,7 @@ const table = (cols0, rows, room = inner, after) => {
 const pressable = (runs, onPress, label) => h('button', { class: 'p', onclick: onPress, 'aria-label': label },
   runs.map(r => h('span', { class: `${r.bold ? 'b' : ''} ${r.dim ? 'dim' : ''} ${r.mono ? 'mono' : ''} ${r.cls || ''}`, style: r.color ? `color:var(--${r.color})` : undefined }, r.text)))
 const arrowRun = on => ({ text: on ? '▾ ' : '▸ ', dim: true })
-const tickRun = on => ({ text: on ? '☑' : '☐', color: on ? 'claude' : undefined, dim: !on, bold: on, mono: true })
+const tickRun = on => ({ text: on ? '☑' : '☐', color: on ? 'claude' : undefined, dim: !on, bold: on, mono: true, cls: 'tick' })
 const cog = (on, onPress) => pressable([{ text: '⚙', color: 'claude', cls: 'cog' }], onPress, 'Card settings')
 const extraTicks = card => h('div', { class: 'col ind' }, (EXTRAS[card] || []).map(d => {
   const on = extrasOf(card)[d.key]
@@ -167,6 +169,9 @@ const section = (id, title, summary, body, more) => {
     items: [(EXTRAS[id] || []).length ? heading('Show in this card') : null, (EXTRAS[id] || []).length ? extraTicks(id) : null, more ? more() : null],
     isOpen: isOpen(id), body })
 }
+
+// Every running clock moves each second by the viewer's own clock, not only when the mod publishes.
+setInterval(() => { for (const el of document.querySelectorAll('[data-since]')) el.textContent = clock(Math.max(0, Date.now() - Number(el.getAttribute('data-since')))) }, 1000)
 
 function draw() {
   // Cells across: the card's inner width in the body face's `ch`.
@@ -257,7 +262,7 @@ function draw() {
         ctxPct === null ? T('The window size comes from the live session; this copy was made without it.', 'foot dim') : null),
       vitalsOpen && stats([
         stat(v.costUsd !== null ? 'Cost' : 'Cost (est.)', usd(v.costUsd ?? total.usd), { color: 'claude' }),
-        stat('Running for', clock(runFor), { sub: `since ${when(startedAt)}` }),
+        stat('Running for', clock(Math.max(runFor, Date.now() - startedAt)), { sub: `since ${when(startedAt)}`, since: startedAt }),
         mainEx.active ? stat('Active', clock(actMs), { sub: `${runFor > 0 ? Math.round((100 * actMs) / runFor) : 0}% of the time` }) : null,
         stat('Requests', String(total.calls)),
         stat('Cost / request', perReq(snapCost, total.calls)),
