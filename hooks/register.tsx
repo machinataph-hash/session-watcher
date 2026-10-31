@@ -249,8 +249,11 @@ const callsCsv = (list: Call[], factor: number) =>
 type LiveCfg = { on: boolean; everyS: number }
 const LIVE = 'live'
 const LIVE_DEFAULT: LiveCfg = { on: true, everyS: 10 }
-// The refresh rate is a preference: `/session-watcher live <seconds>` or the Main card's ⚙ steps it, 2 to 20 seconds.
-const LIVE_MIN_S = 2
+// The refresh rate is a preference: `/session-watcher live <seconds>` or the Main card's ⚙ steps it, 1 to 20 seconds (1 with a warning).
+const LIVE_MIN_S = 1
+// Below this the page republishes after nearly every request: allowed, with a warning, since the person knows their setup.
+const LIVE_WARN_S = 2
+const LIVE_WARNING = '1s republishes after almost every request; your browser or claude.ai may lag. Raise it if the page stutters.'
 const LIVE_MAX_S = 20
 const liveEvery = atom({ plugin: 'session-watcher', key: 'liveEvery' } as const, 10)
 const live = { cfg: LIVE_DEFAULT, last: 0, timer: null as { cancel: () => void } | null, isBusy: false, isDirty: false, path: '', url: '' }
@@ -418,7 +421,7 @@ export const register: Register = on => {
       await $.store.set(LIVE, live.cfg).catch(() => undefined)
       await update($, liveEvery, () => live.cfg.everyS)
       if (live.cfg.on) scheduleLive($, true)
-      return { text: live.cfg.on ? `Live page on: published after each request, at most every ${live.cfg.everyS}s.${live.url ? ` ${live.url}` : ''}` : 'Live page off. /session-watcher report publishes once.' }
+      return { text: live.cfg.on ? `Live page on: published after each request, at most every ${live.cfg.everyS}s.${live.cfg.everyS < LIVE_WARN_S ? ` Warning: ${LIVE_WARNING}` : ''}${live.url ? ` ${live.url}` : ''}` : 'Live page off. /session-watcher report publishes once.' }
     }
     if (verb === 'close') {
       await $.ui.close({ id: PANE })
@@ -1229,10 +1232,13 @@ export const register: Register = on => {
               group('cards', 'CARDS', 'Tick to show, drag to move. Each card has its own ⚙ for its extras.', chips),
               group('main-extras', 'MAIN CARD', 'Extras shown in this card.', extraTicks('vitals')),
               group('refresh', 'LIVE PAGE REFRESH', 'A preference: the page publishes at most this often. 10s by default.', (
+                <Box key="refresh" flexDirection="column">
                 <Box key="refresh-row" flexDirection="row" gap={1} alignItems="center" paddingLeft={INDENT}>
                   <Box width={2} flexShrink={0}>{pressable('live-dn', [{ text: '−', bold: everyS > LIVE_MIN_S, dim: everyS <= LIVE_MIN_S }], () => void stepLive($, -1))}</Box>
                   <Text tabular bold color={everyS !== LIVE_DEFAULT.everyS ? 'claude' : undefined}>{`${everyS}s`}</Text>
                   <Box width={2} flexShrink={0}>{pressable('live-up', [{ text: '+', bold: everyS < LIVE_MAX_S, dim: everyS >= LIVE_MAX_S }], () => void stepLive($, 1))}</Box>
+                </Box>
+                {everyS < LIVE_WARN_S && <Text key="refresh-warn" size="footnote" color="warning" wrap="wrap">{`⚠ ${LIVE_WARNING}`}</Text>}
                 </Box>
               )),
               group('sample', 'SAMPLE DATA', 'Fill empty cards with labelled sample values.', (

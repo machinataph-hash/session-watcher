@@ -20,7 +20,7 @@ Session Watcher shows the same cards in two places. Use either, or both.
 | Where it shows | Local sessions: the terminal and the desktop app's Code tab | Anywhere you are signed in to claude.ai, including cloud sessions in the desktop app, where the pane cannot be drawn |
 | Open it | `/session-watcher` | Link in a toast and the Activity card; pin it to the claude.ai sidebar |
 | Own window | No, it sits beside the chat | Yes, open it in its own browser tab or window |
-| Updates | As each event happens | After each request, at most every 10 seconds by default; a preference from 2 to 20 seconds (`/session-watcher live <seconds>`, or the pane's Main card ⚙) |
+| Updates | As each event happens | After each request, at most every 10 seconds by default; a preference from 1 to 20 seconds (`/session-watcher live <seconds>`, or the pane's Main card ⚙) |
 | Page menu | None | claude.ai's own menu: copy as Markdown, export, duplicate, share and more |
 | Viewer settings | Kept by the mod | Open cards, extras, theme and order kept in your browser |
 | Turn off | `/session-watcher close` | `/session-watcher live off` |
@@ -56,7 +56,7 @@ It needs `python3` on your PATH for the session totals and active time. Mods are
 | `/session-watcher reset` | put every section back to its starting open or closed state |
 | `/session-watcher report` | publish the live page now |
 | `/session-watcher live on` / `off` | turn the live page on or off (on by default) |
-| `/session-watcher live <seconds>` | the live page's refresh rate, a preference kept across sessions: 2 to 20 seconds, 10 by default. The pane's Main card ⚙ steps it too |
+| `/session-watcher live <seconds>` | the live page's refresh rate, a preference kept across sessions: 1 to 20 seconds, 10 by default. The pane's Main card ⚙ steps it too |
 
 Click a section's title to open or close it. The top card is always shown. Session Totals and Tasks start open, and the rest start closed, so you choose what you see. The pane opens by itself when a session starts.
 
@@ -125,7 +125,7 @@ A second tool, `context_breakdown`, returns the context window broken down as `/
 
 ## Live page
 
-Session Watcher also publishes the pane as a private page on claude.ai, so you can follow a session where the pane can't be drawn, such as a cloud session in the desktop app. After each model request it writes its state into [`report/page.html`](report/page.html) and publishes it with the Artifact tool, at most once every 10 seconds by default. The refresh rate is a preference: set it from 2 to 20 seconds with `/session-watcher live <seconds>` or the − / + under Live page refresh in the pane's Main card ⚙, and it is kept for later sessions. The page's own ⚙ shows the rate but cannot change it, since the page has no way to reach the mod; requests inside that wait are published when it ends, so the page never stays behind. The first publish puts the link in Activity and in a toast; later ones update the same page, and an open page picks up the update by itself.
+Session Watcher also publishes the pane as a private page on claude.ai, so you can follow a session where the pane can't be drawn, such as a cloud session in the desktop app. After each model request it writes its state into [`report/page.html`](report/page.html) and publishes it with the Artifact tool, at most once every 10 seconds by default. The refresh rate is a preference: set it from 1 to 20 seconds with `/session-watcher live <seconds>` or the − / + under Live page refresh in the pane's Main card ⚙, and it is kept for later sessions. 1 second is allowed with a warning: the page then republishes after almost every request, which your browser or claude.ai may not keep up with. Pick what your setup can handle. The page's own ⚙ shows the rate but cannot change it, since the page has no way to reach the mod; requests inside that wait are published when it ends, so the page never stays behind. The first publish puts the link in Activity and in a toast; later ones update the same page, and an open page picks up the update by itself.
 
 <p align="center">
   <img src="docs/page-frostwerk.png" alt="The live page in the Frostwerk theme: Main card, Session Totals, Tasks and Recent Requests" width="260">
