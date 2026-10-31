@@ -256,7 +256,8 @@ const LIVE_WARN_S = 2
 const LIVE_WARNING = '1s republishes after almost every request; your browser or claude.ai may lag. Raise it if the page stutters.'
 const LIVE_MAX_S = 20
 const liveEvery = atom({ plugin: 'session-watcher', key: 'liveEvery' } as const, 10)
-const live = { cfg: LIVE_DEFAULT, last: 0, timer: null as { cancel: () => void } | null, isBusy: false, isDirty: false, path: '', url: '' }
+const LIVE_URLS = 'liveUrls'
+const live = { cfg: LIVE_DEFAULT, last: 0, timer: null as { cancel: () => void } | null, isBusy: false, isDirty: false, path: '', url: '', sid: '' }
 const isLiveCall = (tool: string, input: unknown) => tool === 'Artifact' && live.path !== '' && (input as { file_path?: unknown } | null)?.file_path === live.path
 
 const liveSnapshot = async ($: EngineInterface) => {
@@ -277,21 +278,32 @@ const publishLive = async ($: EngineInterface) => {
       const id = await $.session.id()
       if (!home || !id) return
       live.path = `${home}/.claude/session-watcher/live/${id}/session-watcher.html`
+      live.sid = id
+      // The page's link, kept per session: after a restart or reload the same page is updated, not a new one made.
+      const urls = ((await $.store.get(LIVE_URLS).catch(() => undefined)) ?? {}) as Record<string, string>
+      if (!live.url && typeof urls[id] === 'string') live.url = urls[id]
     }
     const page = await $.fs.read(`${$.plugin.root}/report/page.html`)
     const state = JSON.stringify(await liveSnapshot($)).replace(/</g, '\\u003c')
     await $.fs.write(live.path, page.replace('__STATE__', () => state))
     live.last = await $.clock.now()
-    const r = (await $.tool.call({
+    const send = async () => (await $.tool.call({
       tool: 'Artifact',
       file_path: live.path,
-      ...(live.url ? {} : { icon: 'gauge', description: 'Session Watcher, live: this session’s cost, tokens, cache and activity.' }),
+      ...(live.url ? { url: live.url } : { icon: 'gauge', description: 'Session Watcher, live: this session’s cost, tokens, cache and activity.' }),
     } as never)) as { deny?: string; text?: string; isError?: boolean; result?: unknown }
-    const text = r.deny ?? r.text ?? (typeof r.result === 'string' ? r.result : JSON.stringify(r.result ?? ''))
+    const textOf = (r: { deny?: string; text?: string; result?: unknown }) => r.deny ?? r.text ?? (typeof r.result === 'string' ? r.result : JSON.stringify(r.result ?? ''))
+    let r = await send()
+    // The first publish to a kept link after a restart is refused once, with the live version handed back; that
+    // counts as reading it, so the same publish goes through on the second try.
+    if (live.url && (r.isError || r.deny !== undefined)) r = await send()
+    const text = textOf(r)
     const url = /https:\/\/claude\.ai\/(?:code\/)?artifact\/[\w-]+/.exec(text)?.[0]
     if (r.deny !== undefined || r.isError) await say($, 'page', `publish failed · ${shorten(text, 60)}`, 'error')
     else if (url && url !== live.url) {
       live.url = url
+      const urls = ((await $.store.get(LIVE_URLS).catch(() => undefined)) ?? {}) as Record<string, string>
+      await $.store.set(LIVE_URLS, { ...Object.fromEntries(Object.entries(urls).slice(-20)), [live.sid]: url }).catch(() => undefined)
       await say($, 'page', `live at ${url}`, 'done')
       $.ui.toast(`Session Watcher page: ${url}`)
     }
