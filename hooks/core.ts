@@ -345,6 +345,7 @@ export const EXTRAS: Record<string, { key: string; label: string; isOn: boolean 
   ],
   session: [
     { key: 'tokens', label: 'Token counts and weight', isOn: true },
+    { key: 'models', label: 'Who · model', isOn: true },
     { key: 'csv', label: 'Copy as CSV buttons', isOn: true },
   ],
   tasks: [

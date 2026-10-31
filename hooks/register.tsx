@@ -1388,7 +1388,7 @@ export const register: Register = on => {
         sessEx.tokens && stat('w', 'WEIGHTED', k(weighted(total)), { sub: 'tokens by price' }),
       ]),
       kinds('kinds', total, inner, sessEx.tokens, hasScan ? snapCost : undefined),
-      byModel.length > 0 && table('who', [
+      sessEx.models && byModel.length > 0 && table('who', [
         { id: 'sw', label: '', kind: 'mark', w: 1 },
         { id: 'w', label: 'WHO · MODEL', kind: 'free' },
         isWide && { id: 'c', label: 'CALLS', kind: 'num' },

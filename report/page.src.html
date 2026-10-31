@@ -299,7 +299,7 @@ function draw() {
     (hasScan || sessEx.tokens) && stats([hasScan && stat('Main thread', usd(mainCost), { sub: `${perReq(mainCost, mainU.calls)} / request` }), hasScan && stat('Sub-Agents', usd(agentCost), { sub: `${perReq(agentCost, agentU.calls)} / request` }),
       sessEx.tokens && stat('Fresh', k(fresh(total)), { sub: 'input + write + output' }), sessEx.tokens && stat('Cache read', k(total.cacheRead)), sessEx.tokens && stat('Weighted', k(weighted(total)), { sub: 'tokens by price' })]),
     kinds(total, inner, sessEx.tokens, hasScan ? snapCost : undefined),
-    byModel.length > 0 && table([
+    sessEx.models && byModel.length > 0 && table([
       { id: 'sw', label: '', kind: 'mark', w: 1 }, { id: 'w', label: 'Who · model', kind: 'free' }, isWide && { id: 'c', label: 'Calls', kind: 'num' },
       { id: 'o', label: 'Output', kind: 'num' }, sessEx.tokens && { id: 'wt', label: 'Weight', kind: 'num' }, { id: 'u', label: 'Cost', kind: 'num' },
     ], byModel.map(r => ({ sw: swatch(r.color), w: h('span', {}, r.who, T(` · ${modelName(r.model)}`, 'dim')), c: n(String(r.u.calls), { dim: true }), o: n(k(r.u.output)), wt: n(`${Math.round((100 * weighted(r.u)) / (weighted(total) || 1))}%`, { dim: true }), u: n(usd(r.u.usd * factor), { bold: true }) })),
