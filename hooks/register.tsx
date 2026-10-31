@@ -1053,8 +1053,15 @@ export const register: Register = on => {
     // (all, else two, else one); every row has that count, a short last row padded with empty cells so nothing stretches.
     // Width unknown (0): the surface wraps cells of at least `min` itself.
     const knownW = (e.props.bodyColumns ?? 0) > 0
+    // A stat can ask for a little more room than its neighbours (Running for: 20%), as `grow` on its element.
+    const grows = new WeakMap<object, number>()
+    const withGrow = <T,>(grow: number | undefined, node: T): T => {
+      if (grow !== undefined && node && typeof node === 'object') grows.set(node as object, grow)
+      return node
+    }
+    const growOf = (node: unknown) => (node && typeof node === 'object' ? grows.get(node) ?? 1 : 1)
     const gridCell = (key: string, node: unknown, min?: number) => (
-      <Box key={key} flexDirection="column" flexGrow={1} flexShrink={1} width={min ?? 0} minWidth={min ?? 0}>{node as never}</Box>
+      <Box key={key} flexDirection="column" flexGrow={growOf(node)} flexShrink={1} width={min ?? 0} minWidth={min ?? 0}>{node as never}</Box>
     )
     // `cols` is the card's column count: every grid in one card passes the same one, so rows of different
     // lengths still share column edges (a short row is padded with empty cells, never stretched).
@@ -1083,7 +1090,7 @@ export const register: Register = on => {
         </Box>
       )
     }
-    const stat = (key: string, label: string, value: string, opts: { color?: 'claude' | 'error' | 'warning' | 'success'; sub?: string } = {}) => (
+    const stat = (key: string, label: string, value: string, opts: { color?: 'claude' | 'error' | 'warning' | 'success'; sub?: string; grow?: number } = {}) => withGrow(opts.grow, (
       <Box key={key} flexDirection="column">
         {heading('l', label)}
         <Text size="heading" weight="semibold" bold tabular color={opts.color} wrap="truncate-end">
@@ -1095,7 +1102,7 @@ export const register: Register = on => {
           </Text>
         ) : null}
       </Box>
-    )
+    ))
     const stats = (key: string, items: unknown[], cols?: number) => grid(key, items, STAT_MIN, inner, cols)
 
     // A transcript read has landed (its time may be 0 under a test clock; its models are what count).
@@ -1279,7 +1286,7 @@ export const register: Register = on => {
         </Box>
         {vitalsOpen && stats('s1', [
           stat('cost', v.costUsd !== null ? 'COST' : 'COST (EST.)', usd(v.costUsd ?? total.usd), { color: 'claude' }),
-          stat('run', 'RUNNING FOR', clock(runFor), { sub: `since ${when(startedAt)}` }),
+          stat('run', 'RUNNING FOR', clock(runFor), { sub: `since ${when(startedAt)}`, grow: 1.2 }),
           ...(mainEx.active ? [stat('act', 'ACTIVE', clock(actMs), { sub: `${runFor > 0 ? Math.round((100 * actMs) / runFor) : 0}% of the time` })] : []),
           stat('calls', 'REQUESTS', String(total.calls)),
           // Cost and requests from the same snapshot, so the quotient is of one moment.

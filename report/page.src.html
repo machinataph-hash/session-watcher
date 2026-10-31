@@ -53,7 +53,7 @@ button.btn:hover, button.p:hover { color: var(--claude); }
 .sw8 { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
 .cell { flex: 0 0 auto; display: flex; min-width: 0; }
 .r { justify-content: flex-end; text-align: right; }
-.gridrow { display: flex; gap: 1ch; }
+.gridrow { display: flex; gap: 1.5ch; }
 .gridrow > div { flex: 1 1 0; min-width: 0; }
 .ind { padding-left: 1ch; }
 .warn { font-size: 11px; }
@@ -130,10 +130,10 @@ const grid = (items0, min, cols) => {
   const per = Array.from({ length: target }, (_, i) => target - i).find(fits) ?? 1
   const rows = []
   for (let i = 0; i < items.length; i += per) rows.push(items.slice(i, i + per))
-  return h('div', { class: 'col gap' }, rows.map(r => h('div', { class: 'gridrow' }, [...r, ...Array(per - r.length).fill(null)].map(it => h('div', {}, it)))))
+  return h('div', { class: 'col gap' }, rows.map(r => h('div', { class: 'gridrow' }, [...r, ...Array(per - r.length).fill(null)].map(it => h('div', { style: it && it.dataset.grow ? `flex-grow:${it.dataset.grow}` : undefined }, it)))))
 }
 // o.since: a clock the page itself keeps running from that time, so it moves between publishes.
-const stat = (label, value, o = {}) => h('div', { class: 'col' }, heading(label), o.since ? h('span', { class: 'big', 'data-since': o.since }, value) : T(value, 'big', o.color), o.sub ? T(o.sub, 'foot dim num trunc') : null)
+const stat = (label, value, o = {}) => h('div', { class: 'col', 'data-grow': o.grow }, heading(label), o.since ? h('span', { class: 'big', 'data-since': o.since }, value) : T(value, 'big', o.color), o.sub ? T(o.sub, 'foot dim num trunc') : null)
 const stats = (items, cols) => grid(items, STAT_MIN, cols)
 // DESIGN 7: one column list for header and rows; free column grows; numbers 8 wide, right-aligned; stacks when narrow.
 const table = (cols0, rows, room = inner, after) => {
@@ -261,7 +261,7 @@ function draw() {
         ctxPct === null ? T('The window size comes from the live session; this copy was made without it.', 'foot dim') : null),
       vitalsOpen && stats([
         stat(v.costUsd !== null ? 'Cost' : 'Cost (est.)', usd(v.costUsd ?? total.usd), { color: 'claude' }),
-        stat('Running for', clock(Math.max(runFor, Date.now() - startedAt)), { sub: `since ${when(startedAt)}`, since: startedAt }),
+        stat('Running for', clock(Math.max(runFor, Date.now() - startedAt)), { sub: `since ${when(startedAt)}`, since: startedAt, grow: 1.2 }),
         mainEx.active ? stat('Active', clock(actMs), { sub: `${runFor > 0 ? Math.round((100 * actMs) / runFor) : 0}% of the time` }) : null,
         stat('Requests', String(total.calls)),
         stat('Cost / request', perReq(snapCost, total.calls)),

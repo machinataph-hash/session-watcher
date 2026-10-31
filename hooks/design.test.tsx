@@ -77,9 +77,10 @@ const checkTree = (root: El, cols: number, surface: string) => {
     const t = textOf(n).trim()
     if (/^[$\d][\d.,]*[k%M]?$|^—$/.test(t)) expect(n.props.justifyContent).toBe('flex-end')
   }
-  // 6 grids (stats, settings groups): every cell grows from zero, so a row's columns are equal and span wall to wall;
+  // 6 grids (stats, settings groups): every cell grows from zero, so a row's columns span wall to wall, equal but for a
+  // stat given a little more room (up to 25%, Running for 20%);
   // every row of one grid has the same number of cells.
-  const isCell = (c: El) => c.type === 'Box' && c.props?.flexGrow === 1 && c.props?.width === 0 && c.props?.minWidth === 0
+  const isCell = (c: El) => c.type === 'Box' && typeof c.props?.flexGrow === 'number' && c.props.flexGrow >= 1 && c.props.flexGrow <= 1.25 && c.props?.width === 0 && c.props?.minWidth === 0
   const grids = els.filter(n => n.type === 'Box' && n.props?.flexDirection === 'column' && kids(n).length > 0 && kids(n).every(r => /^row\d+$/.test(String(keyOf(r)))))
   for (const g of grids) {
     const counts = kids(g).map(r => kids(r).length)

@@ -34,7 +34,7 @@ tree at desktop widths 30, 60, 120 and 200 and terminal widths 80 and 140, setti
 5.4 Every theme ink is at least 4.5:1 against the theme's card and page background.
 
 ## 6. Grids (stat rows and settings groups)
-6.1 Columns span the card wall to wall and are equal: every cell grows from zero (`flexGrow 1`, width 0, `minWidth 0`), so the first column starts on the left inset and the last ends on the right inset.
+6.1 Columns span the card wall to wall and are equal, except that a stat whose value grows long may take a little more room (at most 25% more; Running for takes 20%): every cell grows from zero (`flexGrow 1`, width 0, `minWidth 0`), so the first column starts on the left inset and the last ends on the right inset.
 6.2 Each stat column needs at least 12 cells, each settings group 24. A grid shows the most columns that fit at that minimum, stepping down one column at a time (6, 5, 4, 3, 2, 1).
 6.3 Every row of a grid has the same column count and widths; a short last row is padded with empty cells, never stretched.
 6.4 Stats that belong together sit in one grid, so they stay on one row as long as they fit; Session Totals shows its cost split and token counts as one row of five.
