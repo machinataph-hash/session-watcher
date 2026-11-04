@@ -8,7 +8,7 @@ for (const theme of [undefined, 'frostwerk', 'reader'])
 for (const cols of [0, 30, 120])
 test(`desktop + terminal, real state, theme ${theme ?? "original"}, ${cols} columns`, async ($, on) => {
   mock.clock(on, { now: 5_000_000 })
-  mock.store(on, { layout: theme ? { order: ['session', 'gate'], hidden: [], hideCacheBar: true, theme, targets: { memGood: 4400 }, cards: { vitals: { active: true, ttft: true }, session: { tokens: false } } } : { order: ['session', 'turn', 'tasks', 'requests', 'agents', 'cache', 'log', 'gate'], hidden: [], targets: { memGood: 8000, memFine: 12000, memBar: 20000 } } })
+  mock.store(on, { layout: theme ? { order: ['session', 'gate'], hidden: [], hideCacheBar: true, theme, targets: { memWarn: 45 }, cards: { vitals: { active: true, ttft: true }, session: { tokens: false } } } : { order: ['session', 'turn', 'tasks', 'requests', 'agents', 'cache', 'log', 'gate'], hidden: [], targets: { memWarn: 40, memBad: 60, memBar: 20000 } } })
   on('command.register', async () => ({ value: { command: 'session-watcher' } }) as never)
   on('tool.register', async () => ({ value: { name: 'mark_task' } }) as never)
   on('session.id', async () => ({ value: 'sid' }) as never)

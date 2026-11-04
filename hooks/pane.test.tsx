@@ -139,7 +139,7 @@ test('cache section and its Main line', async ($, on) => {
   await start($, on)
   for (let i = 0; i < 200; i++) await Promise.resolve()
   const ui = await mount($, 'terminal')
-  expect(await ui.find({ type: 'Text', text: /memory index 18k chars \(target 4,200\)/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /memory index 18k chars \(target 4,000\)/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^STARTING LOAD$/ })).toBeUndefined()
   await ui.press({ key: 'sec-cache' })
   expect(await ui.find({ type: 'Text', text: /^STARTING LOAD$/ })).toBeDefined()
@@ -455,24 +455,24 @@ for (const surface of ['terminal', 'desktop'] as const)
 
 test('targets: no upper end, a raised limit carries the one above, defaults are not stored, reset clears', () => {
   const base = cleanLayout(undefined)
-  expect(targetsOf(base).memGood).toBe(4200)
-  let l = applyLayoutMessage(base, { target: { id: 'memGood', by: 1 } })
-  expect(l.targets).toEqual({ memGood: 4400 })
-  l = applyLayoutMessage(l, { target: { id: 'memGood', by: -1 } })
+  // Memory thresholds are percents of the bar's width: 40% and 60% of 10,000 chars.
+  expect(targetsOf(base).memGood).toBe(4000)
+  expect(targetsOf(base).memFine).toBe(6000)
+  let l = applyLayoutMessage(base, { target: { id: 'memWarn', by: 1 } })
+  expect(l.targets).toEqual({ memWarn: 45 })
+  l = applyLayoutMessage(l, { target: { id: 'memWarn', by: -1 } })
   expect(l.targets).toBeUndefined()
-  // Good passes 10,000 and Fine is carried 200 above it, read not stored.
-  for (let i = 0; i < 40; i++) l = applyLayoutMessage(l, { target: { id: 'memGood', by: 1 } })
-  expect(l.targets).toEqual({ memGood: 12200 })
-  expect(canStep(l, 'memGood', 1)).toBe(true)
-  expect(targetsOf(l).memFine).toBe(12400)
-  expect(targetsOf(l).memBar).toBe(12400)
-  // The carried Fine cannot go below Good; Good coming back down brings Fine back to its default.
-  expect(canStep(l, 'memFine', -1)).toBe(false)
-  for (let i = 0; i < 40; i++) l = applyLayoutMessage(l, { target: { id: 'memGood', by: -1 } })
+  // A wider bar moves both thresholds with it.
+  l = applyLayoutMessage(base, { target: { id: 'memBar', by: 1 } })
+  expect([targetsOf(l).memGood, targetsOf(l).memFine]).toEqual([4400, 6600])
+  // Orange carries red 5 above it; red cannot go below it; orange coming back down brings red back to its default.
+  l = base
+  for (let i = 0; i < 6; i++) l = applyLayoutMessage(l, { target: { id: 'memWarn', by: 1 } })
+  expect(targetsOf(l).memBad).toBe(75)
+  expect(canStep(l, 'memBad', -1)).toBe(false)
+  for (let i = 0; i < 6; i++) l = applyLayoutMessage(l, { target: { id: 'memWarn', by: -1 } })
   expect(l.targets).toBeUndefined()
-  expect(targetsOf(l).memFine).toBe(5800)
-  // A stored value far past the old ranges is kept as it is.
-  expect(targetsOf(cleanLayout({ targets: { memGood: 99999 } })).memFine).toBe(100199)
+  expect(targetsOf(l).memBad).toBe(60)
   // Percents and requests go past 100 and 200; each stops only at its floor.
   let c = base
   for (let i = 0; i < 30; i++) c = applyLayoutMessage(c, { target: { id: 'ctxBad', by: 1 } })

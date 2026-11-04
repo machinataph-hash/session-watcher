@@ -28,15 +28,21 @@ const host = (on: On, saved?: unknown) => {
     published.push(e as never)
     return { result: 'Published at https://claude.ai/artifact/AbC123', text: 'Published at https://claude.ai/artifact/AbC123' } as never
   })
+  // As the real tool: a write to an existing document must carry its current version.
+  const version = new Map<string, number>()
   on('tool.call', { tool: 'ArtifactData' }, async (_, e) => {
-    const x = e as { action: string; writes?: { collection: string; doc_id: string; data?: Record<string, unknown>; file_path?: string }[]; out_dir?: string }
+    const x = e as { action: string; collection: string; doc_id: string; data?: Record<string, unknown>; file_path?: string; out_dir?: string; if_version?: number }
+    const key = `${x.collection}/${x.doc_id}`
+    if (saved && !version.has('sessions/sid1')) version.set('sessions/sid1', 1)
     if (x.action === 'get') {
-      if (!saved) return { result: 'Not found', isError: true } as never
-      files.set(`${x.out_dir}/sessions/sid1.json`, JSON.stringify({ data: saved }))
-      return { result: 'ok' } as never
+      if (!version.has(key)) return { result: 'Not found', isError: true } as never
+      files.set(`${x.out_dir}/${key}.json`, JSON.stringify(key === 'sessions/sid1' && saved ? saved : {}))
+      return { result: `1 document saved: "${x.doc_id}" version ${version.get(key)}` } as never
     }
-    for (const w of x.writes ?? []) writes.push({ collection: w.collection, doc_id: w.doc_id, data: w.data ?? JSON.parse(files.get(w.file_path ?? '') ?? '{}') })
-    return { result: 'ok' } as never
+    if (version.has(key) && x.if_version !== version.get(key)) return { result: `version_mismatch: current version ${version.get(key)}`, isError: true } as never
+    version.set(key, (version.get(key) ?? 0) + 1)
+    writes.push({ collection: x.collection, doc_id: x.doc_id, data: x.data ?? JSON.parse(files.get(x.file_path ?? '') ?? '{}') })
+    return { result: `Wrote ${key}, version ${version.get(key)}` } as never
   })
   on('turn.step', async function* () {
     return { turnId: 't', index: 0, answer: '', toolUses: [], stopReason: 'end_turn', usage } as never

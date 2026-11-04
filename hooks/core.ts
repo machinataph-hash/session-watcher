@@ -280,13 +280,13 @@ export const SECTIONS: { id: string; title: string }[] = [
 const SECTION_IDS = SECTIONS.map(s => s.id)
 export const defaultLayout = (): Layout => ({ order: [...SECTION_IDS], hidden: [] })
 
-// The limits set in settings: each moves by its step, with no upper end and nothing below one step. Memory is chars of the
-// memory index (green to Good, orange to Fine, red past it, the bar Bar wide); context and plan limits
-// are percents (orange from Warn, red from Bad); requests per turn turn red past the limit.
+// The limits set in settings: each moves by its step, with no upper end and nothing below one step. Memory, context and
+// plan limits are percents (orange from Warn, red from Bad); the memory bar's width is in chars of the memory index, and
+// its percents are of that width, so the thresholds follow the bar. Requests per turn turn red past the limit.
 export const TARGETS: { id: keyof Targets; label: string; value: number; step: number; min: number }[] = [
-  { id: 'memGood', label: 'Memory index: good to', value: 4200, step: 200, min: 200 },
-  { id: 'memFine', label: 'Memory index: fine to', value: 5800, step: 200, min: 400 },
-  { id: 'memBar', label: 'Memory index: bar width', value: 10000, step: 1000, min: 1000 },
+  { id: 'memBar', label: 'Memory index: bar width (chars)', value: 10000, step: 1000, min: 1000 },
+  { id: 'memWarn', label: 'Memory index: orange from %', value: 40, step: 5, min: 5 },
+  { id: 'memBad', label: 'Memory index: red from %', value: 60, step: 5, min: 10 },
   { id: 'ctxWarn', label: 'Context: orange from %', value: 65, step: 5, min: 5 },
   { id: 'ctxBad', label: 'Context: red from %', value: 85, step: 5, min: 10 },
   { id: 'limWarn', label: 'Plan limits: orange from %', value: 60, step: 5, min: 5 },
@@ -307,8 +307,7 @@ const savedTargets = (raw: unknown): Partial<Targets> => {
 
 // The pairs that must stay apart: the lower limit, the upper one, and the least gap between them.
 const ORDER: [keyof Targets, keyof Targets, number][] = [
-  ['memGood', 'memFine', 200],
-  ['memFine', 'memBar', 0],
+  ['memWarn', 'memBad', 5],
   ['ctxWarn', 'ctxBad', 5],
   ['limWarn', 'limBad', 5],
 ]
@@ -318,6 +317,9 @@ const ORDER: [keyof Targets, keyof Targets, number][] = [
 export const targetsOf = (l: Layout): Targets => {
   const t = { ...(Object.fromEntries(TARGETS.map(d => [d.id, d.value])) as Targets), ...savedTargets(l.targets) }
   for (const [lo, hi, gap] of ORDER) t[hi] = Math.max(t[hi], t[lo] + gap)
+  // The memory thresholds in chars, worked out from the bar's width.
+  t.memGood = Math.round((t.memBar * t.memWarn) / 100)
+  t.memFine = Math.round((t.memBar * t.memBad) / 100)
   return t
 }
 

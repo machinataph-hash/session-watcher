@@ -72,3 +72,6 @@ tree at desktop widths 30, 60, 120 and 200 and terminal widths 80 and 140, setti
 
 ## 13. Themes
 13.1 All themes draw the same layout; only colours change.
+
+## 12. Settings that measure against a range
+12.1 A threshold on a bar with a set width is a percent of that width (memory index: orange from 40%, red from 60% of the bar's chars), set the same way as the context and plan-limit percents, so changing the width moves the thresholds with it.

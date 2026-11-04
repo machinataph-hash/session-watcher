@@ -90,7 +90,8 @@ export type Receipt = { durationMs: number; agents: number; edits: number; error
 // only those that differ from the defaults in core.ts EXTRAS; sample: empty cards show labelled sample values (absent = off).
 export type Layout = { order: string[]; hidden: string[]; theme?: string; targets?: Partial<Targets>; cards?: Record<string, Record<string, boolean>>; sample?: true }
 /** The limits the bars are coloured by: each set in settings, defaults in core.ts TARGETS. */
-export type Targets = { memGood: number; memFine: number; memBar: number; turnMax: number; ctxWarn: number; ctxBad: number; limWarn: number; limBad: number }
+/** memGood and memFine are worked out from memBar and its percents (memWarn, memBad), never set. */
+export type Targets = { memGood: number; memFine: number; memBar: number; memWarn: number; memBad: number; turnMax: number; ctxWarn: number; ctxBad: number; limWarn: number; limBad: number }
 export type LogLine = { at: number; who: string; text: string; kind: 'info' | 'error' | 'done' }
 
 declare module 'claude-code' {

@@ -292,19 +292,47 @@ const findPage = async ($: EngineInterface): Promise<Shared | null> => {
   if (kept?.url) return kept
   const r = (await $.tool.call({ tool: 'Artifact', action: 'list', limit: 50 } as never)) as ToolAnswer
   if (failed(r)) return null
-  const row = textOf(r).split('\n').find(x => x.includes(`${PAGE_TITLE} —`) || x.includes(`${PAGE_TITLE} -`))
+  // The newest artifact with the page's title; the first shared page kept the older title.
+  const row = textOf(r).split('\n').find(x => x.includes(`${PAGE_TITLE} —`)) ?? textOf(r).split('\n').find(x => /Session Watcher —/.test(x))
   const url = row ? URL_RE.exec(row)?.[0] : undefined
   return url ? { url, hash: '' } : null
+}
+
+// A write to a document that exists must name the version last seen; versions come back in every read and write.
+const versions = new Map<string, number>()
+const versionIn = (text: string) => Number(/version\D{0,3}(\d+)/i.exec(text)?.[1]) || undefined
+const readDoc = async ($: EngineInterface, collection: string, doc_id: string) => {
+  const out = `${live.dir}/read`
+  const r = (await $.tool.call({ tool: 'ArtifactData', action: 'get', url: live.url, collection, doc_id, out_dir: out } as never)) as ToolAnswer
+  if (failed(r)) return null
+  const v = versionIn(textOf(r))
+  if (v) versions.set(`${collection}/${doc_id}`, v)
+  return await $.fs.read(`${out}/${collection}/${doc_id}.json`).then(t => JSON.parse(t) as Record<string, unknown>).catch(() => null)
+}
+// One document replaced, pinned to the version last seen; if another session wrote it since (or it was never read
+// here), read its version and write once more.
+const writeDoc = async ($: EngineInterface, collection: string, doc_id: string, body: { data: unknown } | { file_path: string }) => {
+  const key = `${collection}/${doc_id}`
+  const send = async () => (await $.tool.call({ tool: 'ArtifactData', action: 'set', url: live.url, collection, doc_id, ...body, ...(versions.has(key) ? { if_version: versions.get(key) } : {}) } as never)) as ToolAnswer
+  let r = await send()
+  if (failed(r)) {
+    versions.delete(key)
+    const g = (await $.tool.call({ tool: 'ArtifactData', action: 'get', url: live.url, collection, doc_id, out_dir: `${live.dir}/read` } as never)) as ToolAnswer
+    const v = failed(g) ? undefined : versionIn(textOf(g))
+    if (v) versions.set(key, v)
+    r = await send()
+  }
+  const v = failed(r) ? undefined : versionIn(textOf(r))
+  if (v) versions.set(key, v)
+  else if (!failed(r)) versions.set(key, (versions.get(key) ?? 0) + 1)
+  return r
 }
 
 // After a restart the in-memory lists are empty: read this session's last saved state back from the page.
 const restore = async ($: EngineInterface) => {
   live.isRestored = true
   if (!live.url) return
-  const out = `${live.dir}/restore`
-  const r = (await $.tool.call({ tool: 'ArtifactData', action: 'get', url: live.url, collection: 'sessions', doc_id: live.sid, out_dir: out } as never)) as ToolAnswer
-  if (failed(r)) return
-  const doc = await $.fs.read(`${out}/sessions/${live.sid}.json`).then(t => JSON.parse(t) as { data?: { state?: Record<string, unknown> }; state?: Record<string, unknown> }).catch(() => null)
+  const doc = (await readDoc($, 'sessions', live.sid)) as { data?: { state?: Record<string, unknown> }; state?: Record<string, unknown> } | null
   const st = (doc?.data?.state ?? doc?.state) as { calls?: Call[]; tasks?: Task[]; gate?: Gate; log?: LogLine[]; receipt?: Receipt | null; agents?: AgentCard[] } | undefined
   if (!st) return
   // What this process saw since it started goes after what was saved before it: older saved rows first.
@@ -378,14 +406,9 @@ const publishLive = async ($: EngineInterface) => {
     const stateFile = `${live.dir}/state.json`
     await $.fs.write(stateFile, JSON.stringify({ updatedAt: snap.exportedAt, sessionStart: snap.sessionStart, model: snap.vitals.model, state: snap }))
     const limits = snap.vitals.limits.map(l => ({ kind: l.kind, pct: l.pct, resetsAt: l.resetsAt }))
-    const r = (await $.tool.call({
-      tool: 'ArtifactData', action: 'batch', url: live.url,
-      writes: [
-        { op: 'set', collection: 'sessions', doc_id: live.sid, file_path: stateFile },
-        ...(limits.length ? [{ op: 'set', collection: 'limits', doc_id: 'latest', data: { at: snap.exportedAt, session: live.sid, limits } }] : []),
-      ],
-    } as never)) as ToolAnswer
+    const r = await writeDoc($, 'sessions', live.sid, { file_path: stateFile })
     if (failed(r)) await say($, 'page', `update failed · ${shorten(textOf(r), 60)}`, 'error')
+    else if (limits.length) await writeDoc($, 'limits', 'latest', { data: { at: snap.exportedAt, session: live.sid, limits } })
   } catch (err) {
     await say($, 'page', `publish failed · ${shorten(String((err as Error)?.message ?? err), 60)}`, 'error').catch(() => undefined)
   } finally {
@@ -1757,7 +1780,7 @@ export const register: Register = on => {
                 {labelValue('h', 'MEMORY INDEX', `${ch.memoryChars.toLocaleString('en-US')} / ${tg.memBar.toLocaleString('en-US')} chars`, { text: memWord, color: memColor })}
                 {barRow('bar', [{ value: Math.min(1, ch.memoryChars / tg.memBar), color: memColor }], inner)}
                 <Text size="footnote" dimColor tabular wrap="truncate-end">
-                  {`Good to ${tg.memGood.toLocaleString('en-US')} (target) · Fine to ${tg.memFine.toLocaleString('en-US')} · Bad past it`}
+                  {`Orange from ${tg.memGood.toLocaleString('en-US')} (${tg.memWarn}%) · red from ${tg.memFine.toLocaleString('en-US')} (${tg.memBad}%) of ${tg.memBar.toLocaleString('en-US')}`}
                 </Text>
               </Box>
             ),
