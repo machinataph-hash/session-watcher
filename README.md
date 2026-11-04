@@ -139,11 +139,12 @@ Each card's summary line names what it covers: whole session, your last message,
 
 Session Watcher keeps one private page on claude.ai, **Session Watcher Live**, for all your sessions and conversations, so you can follow a session where the pane can't be drawn, such as a cloud session in the desktop app. The mod publishes the page's code once (and again only when the code changes). After each model request it writes the session's state into the page's own database, at most once every 10 seconds by default; an open page updates by itself.
 
-- **Every session and conversation.** Each session has its own record, keyed by its session id. A picker at the top of the page switches between them, newest first.
+- **Every session and conversation.** Each session has its own record, keyed by its session id. A picker at the top of the page chooses **Follow newest** (the default: whichever session updated last) or one fixed session, kept until you change it; the choice is remembered in your browser. Each session is labelled ☁️ cloud or 💻 local, with its folder, in the picker and under it.
 - **Plan limits from one source.** The 5-hour and 7-day limits are your account's, shared by every session. Each session writes its latest reading to one shared record, and every page shows the newest one with its time.
 - **Survives restarts.** Requests, tasks, permissions and activity are kept in the page's database; after a restart or reload the mod reads them back, so a session that runs for days keeps its history.
 - **By Day.** The transcripts' hours grouped by your local day: calls, active time and cost per day. Its ⚙ sets the range from today only to the last 30 days; older days are added up in one Earlier row, so the rows always add up to Session Totals. The range starts at the last 7 days.
-- The mod finds the shared page by its title, so a new session or a new container uses the same page; pin it once.
+- The mod finds the shared page by its title, so a new session or a new container uses the same page.
+- **Bookmark it; don't pin it.** The Claude app opens a pinned artifact together with the conversation that first published it, so the sidebar pin brings that session forward, not the one you are working in. Open the link in its own browser tab or bookmark it instead: that never switches your Claude session.
 
 The refresh rate is a preference: set it from 1 to 20 seconds with `/session-watcher live <seconds>` or the − / + under Live page refresh in the pane's Main card ⚙, and it is kept for later sessions. 1 second is allowed with a warning.
 

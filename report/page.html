@@ -260,6 +260,7 @@ function draw() {
         group('Refresh', 'A preference, 10s by default. The page cannot reach the mod, so set it in the pane’s ⚙ or with the command.', h('div', { class: 'col ind' },
           T(`Every ${S.liveEveryS ?? 10}s`, 'num b'), T(`/session-watcher live <1–20>`, 'foot dim num'),
           (S.liveEveryS ?? 10) < 2 ? T('⚠ 1s republishes after almost every request; your browser or claude.ai may lag. Raise it if the page stutters.', 'foot', 'warning') : null)),
+        group('This page', 'Bookmark this page’s link rather than pinning it in the Claude sidebar: a pin reopens the session that first published the page, not the one you are working in.', h('div', { class: 'col ind' }, T('Session picker: Follow newest, or one fixed session.', 'foot dim'))),
         group('Theme', 'Colours for the whole page.', h('div', { class: 'col ind' }, themeChoices.map(o => {
           const on = (lay.theme ?? 'app') === o.id
           return pressable([tickRun(on), { text: `  ${o.name}`, dim: !on }], () => { lay.theme = o.id === 'app' ? undefined : o.id; save(); draw() })
@@ -459,8 +460,10 @@ function draw() {
   }
   root.replaceChildren(
     h('div', { class: 'top' }, T(`Updated ${when(now)}:${String(new Date(now).getSeconds()).padStart(2, '0')}`, 'b'), T(sessions.length ? 'Live from the Session Watcher mod.' : 'Published by the Session Watcher mod.', 'src')),
-    sessions.length > 1 ? h('label', { class: 'row picker' }, T('Session', 'h'), h('select', { onchange: ev => { pick = ev.target.value; save(); choose() } },
-      sessions.map(x => h('option', { value: x.id, selected: x.id === S.sessionId ? '' : undefined }, `${when(x.updatedAt)} · ${x.sessionStart ? `since ${when(x.sessionStart)}` : x.id.slice(0, 8)}${x.model ? ` · ${modelName(x.model)}` : ''}`)))) : '',
+    sessions.length > 1 ? h('label', { class: 'row picker' }, T('Session', 'h'), h('select', { onchange: ev => { pick = ev.target.value || null; save(); choose() } },
+      [h('option', { value: '', selected: pick ? undefined : '' }, 'Follow newest'),
+        ...sessions.map(x => h('option', { value: x.id, selected: pick && x.id === S.sessionId ? '' : undefined }, `${when(x.updatedAt)}${x.where ? ` · ${whereText(x.where)}` : ''}${x.sessionStart ? ` · since ${when(x.sessionStart)}` : ` · ${x.id.slice(0, 8)}`}${x.model ? ` · ${modelName(x.model)}` : ''}`))])) : '',
+    shownWhere ? T(`${whereText(shownWhere)}${pick ? ' · fixed session' : ' · following the newest session'}`, 'dim') : '',
     vitalsCard,
     ...lay.order.filter(id => !lay.hidden.includes(id)).map(id => byId[id]?.()),
     T((isCalibrated ? 'Cost is Claude Code’s own total. Each row’s cost is its tokens at list price, scaled so the rows add up to that total.' : 'Cost is an estimate at list price until Claude Code reports the session cost.') + ' Cost per request = cost ÷ requests, both from the same transcript read. Weighted = input ×1 + cache write ×1.25 (five-minute cache) or ×2 (one-hour cache) + cache read ×0.1 + output ×5. Fresh = input + cache write + output.', 'foot dim'),
@@ -478,8 +481,13 @@ async function copy(ev, text) {
 draw()
 // The page's database: every session's state, newest first, and the shared plan limits. Without it the state
 // built into the page shows.
+// Where a session runs, as the mod recorded it: cloud or local, and its folder.
+const whereText = w => w ? `${w.kind === 'cloud' ? '☁️ cloud' : '💻 local'}${w.folder ? ` · ${w.folder}` : ''}` : ''
+let shownWhere = null
 function choose() {
+  if (pick && sessions.length && !sessions.some(d => d.id === pick)) pick = null
   const x = sessions.find(d => d.id === pick) || sessions[0]
+  shownWhere = x ? x.where || null : null
   if (x && x.state) S = x.state
   draw()
 }

@@ -271,7 +271,7 @@ const SHARED = 'sharedPage'
 const PAGE_TITLE = 'Session Watcher Live'
 const PAGE_CAPS = { db: {} }
 type Shared = { url: string; hash: string }
-const live = { cfg: LIVE_DEFAULT, last: 0, timer: null as { cancel: () => void } | null, isBusy: false, isDirty: false, dir: '', url: '', hash: '', sid: '', isRestored: false }
+const live = { cfg: LIVE_DEFAULT, last: 0, timer: null as { cancel: () => void } | null, isBusy: false, isDirty: false, dir: '', url: '', hash: '', sid: '', isRestored: false, where: null as { kind: 'cloud' | 'local'; folder: string } | null }
 const URL_RE = /https:\/\/claude\.ai\/(?:code\/)?artifact\/[\w-]+/
 // The mod's own calls stay out of the Permissions and Activity counts.
 const isLiveCall = (tool: string, input: unknown) =>
@@ -386,6 +386,10 @@ const publishLive = async ($: EngineInterface) => {
       if (!home || !id) return
       live.dir = `${home}/.claude/session-watcher/live/${id}`
       live.sid = id
+      // Where this session runs: a cloud session sets CLAUDE_CODE_REMOTE; the folder is the session's working directory's name.
+      const remote = (await $.process.run(['printenv', 'CLAUDE_CODE_REMOTE']).catch(() => null))?.stdout.trim() ?? ''
+      const cwd = await $.session.cwd().catch(() => '')
+      live.where = { kind: remote === 'true' || remote === '1' ? 'cloud' : 'local', folder: cwd.split('/').filter(Boolean).pop() ?? '' }
       const kept = await findPage($)
       if (kept) ({ url: live.url, hash: live.hash } = kept)
     }
@@ -413,13 +417,13 @@ const publishLive = async ($: EngineInterface) => {
       live.hash = hash
       await $.store.set(SHARED, { url, hash }).catch(() => undefined)
       if (isNew) {
-        await say($, 'page', `live at ${url}`, 'done')
-        $.ui.toast(`Session Watcher page: ${url}`)
+        await say($, 'page', `live at ${url} · bookmark this link rather than pinning it: a pin reopens the session that created it`, 'done')
+        $.ui.toast(`Session Watcher page: ${url} · bookmark this link rather than pinning it: a pin reopens the session that created it.`)
       }
     }
     // The data: this session's state, and the plan limits as last read, both in one write.
     const stateFile = `${live.dir}/state.json`
-    await $.fs.write(stateFile, JSON.stringify({ updatedAt: snap.exportedAt, sessionStart: snap.sessionStart, model: snap.vitals.model, state: snap }))
+    await $.fs.write(stateFile, JSON.stringify({ updatedAt: snap.exportedAt, sessionStart: snap.sessionStart, model: snap.vitals.model, where: live.where, state: snap }))
     const limits = snap.vitals.limits.map(l => ({ kind: l.kind, pct: l.pct, resetsAt: l.resetsAt }))
     const r = await writeDoc($, 'sessions', live.sid, { file_path: stateFile })
     if (failed(r)) await say($, 'page', `update failed · ${shorten(textOf(r), 60)}`, 'error')
