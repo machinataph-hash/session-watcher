@@ -325,6 +325,8 @@ const writeDoc = async ($: EngineInterface, collection: string, doc_id: string, 
   const v = failed(r) ? undefined : versionIn(textOf(r))
   if (v) versions.set(key, v)
   else if (!failed(r)) versions.set(key, (versions.get(key) ?? 0) + 1)
+  // The last answer for each document, for when a write keeps failing.
+  await $.fs.write(`${live.dir}/last-write-${collection}.json`, JSON.stringify({ at: await $.clock.now(), key, sent: versions.get(key) ?? null, answer: r }, null, 1)).catch(() => undefined)
   return r
 }
 
