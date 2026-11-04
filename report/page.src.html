@@ -259,7 +259,7 @@ function draw() {
         group('Refresh', 'A preference, 10s by default. The page cannot reach the mod, so set it in the pane’s ⚙ or with the command.', h('div', { class: 'col ind' },
           T(`Every ${S.liveEveryS ?? 10}s`, 'num b'), T(`/session-watcher live <1–20>`, 'foot dim num'),
           (S.liveEveryS ?? 10) < 2 ? T('⚠ 1s republishes after almost every request; your browser or claude.ai may lag. Raise it if the page stutters.', 'foot', 'warning') : null)),
-        group('This page', 'Bookmark this page’s link rather than pinning it in the Claude sidebar: a pin reopens the session that first published the page, not the one you are working in.', h('div', { class: 'col ind' }, T('Session picker: Follow newest, or one fixed session.', 'foot dim'))),
+        group('This page', 'Open this page with /session-watcher page in the session you are working in, or bookmark its link rather than pinning it in the Claude sidebar: a pin reopens the session that first published the page, not the one you are working in.', h('div', { class: 'col ind' }, T('Session picker: Follow newest, or one fixed session.', 'foot dim'))),
         group('Theme', 'Colours for the whole page.', h('div', { class: 'col ind' }, themeChoices.map(o => {
           const on = (lay.theme ?? 'app') === o.id
           return pressable([tickRun(on), { text: `  ${o.name}`, dim: !on }], () => { lay.theme = o.id === 'app' ? undefined : o.id; save(); draw() })

@@ -410,6 +410,13 @@ const publishLive = async ($: EngineInterface) => {
       // A kept link this process has not published yet is refused once, with the live version handed back; that
       // counts as reading it, so the same publish goes through on the second try.
       if (live.url && failed(r)) r = await send()
+      // A kept link this account cannot open (a page another account published, or one deleted): forget it and
+      // publish this account's own page.
+      if (live.url && failed(r) && /not found|not been shared|not readable/i.test(textOf(r))) {
+        live.url = ''
+        await $.store.set(SHARED, { url: '', hash: '' }).catch(() => undefined)
+        r = await send()
+      }
       if (failed(r)) return void (await say($, 'page', `publish failed · ${shorten(textOf(r), 60)}`, 'error'))
       const url = URL_RE.exec(textOf(r))?.[0] ?? live.url
       const isNew = url !== live.url
@@ -417,8 +424,8 @@ const publishLive = async ($: EngineInterface) => {
       live.hash = hash
       await $.store.set(SHARED, { url, hash }).catch(() => undefined)
       if (isNew) {
-        await say($, 'page', `live at ${url} · bookmark this link rather than pinning it: a pin reopens the session that created it`, 'done')
-        $.ui.toast(`Session Watcher page: ${url} · bookmark this link rather than pinning it: a pin reopens the session that created it.`)
+        await say($, 'page', `live at ${url} · open it with /session-watcher page, or bookmark it rather than pinning it: a pin reopens the session that created it`, 'done')
+        $.ui.toast(`Session Watcher page: ${url} · open it with /session-watcher page, or bookmark it rather than pinning it: a pin reopens the session that created it.`)
       }
     }
     // The data: this session's state, and the plan limits as last read, both in one write.
@@ -468,7 +475,7 @@ export const register: Register = on => {
   let ticking = false
 
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: NAME, description: 'Session Watcher: session vitals, cost and token use', argumentHint: '[open|close|reset|report|live on|off|<seconds>]' })
+    await $.command.register({ name: NAME, description: 'Session Watcher: session vitals, cost and token use', argumentHint: '[open|close|reset|report|page|live on|off|<seconds>]' })
     await $.tool.register({
       name: TOOL,
       description:
@@ -547,6 +554,15 @@ export const register: Register = on => {
     if (verb === 'report') {
       scheduleLive($, true)
       return { text: live.url ? `Publishing Session Watcher to ${live.url}.` : 'Publishing Session Watcher; the link shows in Activity and as a toast.' }
+    }
+    // Shows the page in the session where the command was typed, without pulling up the session that published it.
+    if (verb === 'page') {
+      if (!live.url) {
+        scheduleLive($, true)
+        return { text: 'No page yet; publishing one. Run /session-watcher page again once the link shows in Activity.' }
+      }
+      const r = (await $.tool.call({ tool: 'Artifact', action: 'open', url: live.url } as never)) as ToolAnswer
+      return { text: failed(r) ? `Could not open the page: ${shorten(textOf(r), 80)} ${live.url}` : `Opened Session Watcher Live: ${live.url}` }
     }
     if (verb === 'live') {
       const s = Number(arg)

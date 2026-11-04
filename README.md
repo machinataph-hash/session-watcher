@@ -144,7 +144,8 @@ Session Watcher keeps one private page on claude.ai, **Session Watcher Live**, f
 - **Survives restarts.** Requests, tasks, permissions and activity are kept in the page's database; after a restart or reload the mod reads them back, so a session that runs for days keeps its history.
 - **By Day.** The transcripts' hours grouped by your local day: calls, active time and cost per day. Its ⚙ sets the range from today only to the last 30 days; older days are added up in one Earlier row, so the rows always add up to Session Totals. The range starts at the last 7 days.
 - The mod finds the shared page by its title, so a new session or a new container uses the same page.
-- **Bookmark it; don't pin it.** The Claude app opens a pinned artifact together with the conversation that first published it, so the sidebar pin brings that session forward, not the one you are working in. Open the link in its own browser tab or bookmark it instead: that never switches your Claude session.
+- **Open it with `/session-watcher page`.** The command shows the page in the session where you typed it.
+- **Or bookmark it; don't pin it.** The Claude app opens a pinned artifact together with the conversation that first published it, so the sidebar pin brings that session forward, not the one you are working in. Open the link in its own browser tab or bookmark it instead: that never switches your Claude session.
 
 The refresh rate is a preference: set it from 1 to 20 seconds with `/session-watcher live <seconds>` or the − / + under Live page refresh in the pane's Main card ⚙, and it is kept for later sessions. 1 second is allowed with a warning.
 
