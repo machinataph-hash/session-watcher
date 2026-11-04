@@ -212,6 +212,14 @@ const readTranscript = async ($: EngineInterface) => {
   await update($, active, a => ({ ...a, hist: got.ms ?? 0, ms: 0, since: a.turns.length > 0 ? at : null }))
 }
 
+// An hour without a request: the next message starts a new task (see turn.start).
+const BREAK_MS = 3_600_000
+// A tool's short name: an MCP tool by its own name, without the server prefix.
+const toolLabel = (name: string) => {
+  const parts = name.split('__')
+  return parts[0] === 'mcp' && parts.length >= 3 ? parts.slice(2).join('__') : name
+}
+
 const startTask = async ($: EngineInterface, raw: unknown) => {
   const label = String(raw ?? '').trim() || 'Unlabelled'
   const now = await $.clock.now()
@@ -301,13 +309,22 @@ const findPage = async ($: EngineInterface): Promise<Shared | null> => {
 // A write to a document that exists must name the version last seen; versions come back in every read and write.
 const versions = new Map<string, number>()
 const versionIn = (text: string) => Number(/version\D{0,3}(\d+)/i.exec(text)?.[1]) || undefined
+// A read answers with the document inline, as one JSON line {id, data, version} between the database markers.
+// (Saving it to a file instead would need a file write the mod cannot approve.)
 const readDoc = async ($: EngineInterface, collection: string, doc_id: string) => {
-  const out = `${live.dir}/read`
-  const r = (await $.tool.call({ tool: 'ArtifactData', action: 'get', url: live.url, collection, doc_id, out_dir: out } as never)) as ToolAnswer
+  const r = (await $.tool.call({ tool: 'ArtifactData', action: 'get', url: live.url, collection, doc_id } as never)) as ToolAnswer
   if (failed(r)) return null
-  const v = versionIn(textOf(r))
+  const line = textOf(r).split('\n').find(x => x.trimStart().startsWith('{'))
+  const doc = (() => {
+    try {
+      return line ? (JSON.parse(line) as { data?: Record<string, unknown>; version?: number }) : null
+    } catch {
+      return null
+    }
+  })()
+  const v = doc?.version ?? versionIn(textOf(r))
   if (v) versions.set(`${collection}/${doc_id}`, v)
-  return await $.fs.read(`${out}/${collection}/${doc_id}.json`).then(t => JSON.parse(t) as Record<string, unknown>).catch(() => null)
+  return doc?.data ?? null
 }
 // One document replaced, pinned to the version last seen; if another session wrote it since (or it was never read
 // here), read its version and write once more.
@@ -317,10 +334,8 @@ const writeDoc = async ($: EngineInterface, collection: string, doc_id: string, 
   let r = await send()
   if (failed(r)) {
     versions.delete(key)
-    const g = (await $.tool.call({ tool: 'ArtifactData', action: 'get', url: live.url, collection, doc_id, out_dir: `${live.dir}/read` } as never)) as ToolAnswer
-    const v = failed(g) ? undefined : versionIn(textOf(g))
-    if (v) versions.set(key, v)
-    r = await send()
+    await readDoc($, collection, doc_id)
+    if (versions.has(key)) r = await send()
   }
   const v = failed(r) ? undefined : versionIn(textOf(r))
   if (v) versions.set(key, v)
@@ -334,8 +349,8 @@ const writeDoc = async ($: EngineInterface, collection: string, doc_id: string, 
 const restore = async ($: EngineInterface) => {
   live.isRestored = true
   if (!live.url) return
-  const doc = (await readDoc($, 'sessions', live.sid)) as { data?: { state?: Record<string, unknown> }; state?: Record<string, unknown> } | null
-  const st = (doc?.data?.state ?? doc?.state) as { calls?: Call[]; tasks?: Task[]; gate?: Gate; log?: LogLine[]; receipt?: Receipt | null; agents?: AgentCard[] } | undefined
+  const doc = (await readDoc($, 'sessions', live.sid)) as { state?: Record<string, unknown> } | null
+  const st = doc?.state as { calls?: Call[]; tasks?: Task[]; gate?: Gate; log?: LogLine[]; receipt?: Receipt | null; agents?: AgentCard[] } | undefined
   if (!st) return
   // What this process saw since it started goes after what was saved before it: older saved rows first.
   const before = <T extends { at: number }>(saved: T[] | undefined, here: T[]) => [...(saved ?? []).filter(x => x.at < (here[0]?.at ?? Infinity)), ...here]
@@ -586,7 +601,11 @@ export const register: Register = on => {
     )
     if (e.agentId === undefined) {
       const cost = await $.session.usage().then(u => u.cost?.usd ?? null).catch(() => null)
-      await update($, turn, () => ({ startedAt: now, edits: 0, errors: 0, tools: 0, costAtStart: cost }))
+      await update($, turn, () => ({ startedAt: now, edits: 0, errors: 0, tools: 0, costAtStart: cost, byTool: {}, files: [] }))
+      // A session that runs for days: the first message after an hour's break starts a new task.
+      const lastCall = (await read($, calls)).at(-1)
+      const cur = (await read($, tasks)).at(-1)
+      if (lastCall && now - lastCall.at > BREAK_MS && cur && taskTotal(cur).calls > 0 && lastCall.at >= cur.startedAt) await startTask($, 'After a break')
       await update($, vitals, v => ({ ...v, isRunning: true }))
       if (e.text) await say($, 'you', shorten(e.text, 70))
     }
@@ -723,7 +742,11 @@ export const register: Register = on => {
     const failed = didRun && ran.isError === true
     const isEdit = didRun && !failed && EDIT_TOOLS.has(e.tool)
     const text = shorten(describe(e.tool, e), 64)
-    await update($, turn, t => ({ ...t, tools: t.tools + 1, edits: t.edits + (isEdit ? 1 : 0), errors: t.errors + (failed ? 1 : 0) }))
+    const file = isEdit ? String((e as { file_path?: unknown; notebook_path?: unknown }).file_path ?? (e as { notebook_path?: unknown }).notebook_path ?? '') : ''
+    const addFile = (l: string[] | undefined) => (file && !(l ?? []).includes(file) ? [...(l ?? []), file].slice(-200) : (l ?? []))
+    const name = toolLabel(e.tool)
+    await update($, turn, t => ({ ...t, tools: t.tools + 1, edits: t.edits + (isEdit ? 1 : 0), errors: t.errors + (failed ? 1 : 0), byTool: { ...t.byTool, [name]: (t.byTool?.[name] ?? 0) + 1 }, files: addFile(t.files) }))
+    if (didRun) await update($, tasks, l => l.map((t, i) => (i === l.length - 1 ? { ...t, tools: { ...t.tools, [name]: (t.tools?.[name] ?? 0) + 1 }, files: addFile(t.files) } : t)))
     if (e.agentId) {
       const id = e.agentId
       await update($, agents, l => l.map(c => (c.id === id ? { ...c, lastTool: text } : c)))
@@ -785,6 +808,8 @@ export const register: Register = on => {
         reason: e.reason,
         requests: inTurn.length,
         cacheHit: seen > 0 ? inTurn.reduce((a, c) => a + c.cacheRead, 0) / seen : null,
+        byTool: t.byTool ?? {},
+        files: t.files ?? [],
       }))
       await update($, vitals, v => ({ ...v, isRunning: false }))
       await readUsage($)
@@ -1242,6 +1267,8 @@ export const register: Register = on => {
     const ctxPct = v.ctxTokens !== null && ctxMax > 0 ? Math.round((100 * v.ctxTokens) / ctxMax) : v.ctxLimit > 0 ? null : v.ctxPct
     const ctxColor: BarColor = ctxPct === null ? 'inactive' : ctxPct >= tg.ctxBad ? 'error' : ctxPct >= tg.ctxWarn ? 'warning' : 'success'
     const runFor = now - startedAt
+    const dayStart = new Date(now).setHours(0, 0, 0, 0)
+    const todayU = (sc.hours ?? []).filter(x => x.at + 3_600_000 > dayStart).reduce((p, x) => sum(p, x.usage), empty())
     const actMs = activeMs(act, now)
     const mainEx = extrasOf(lay, 'vitals')
     // ---- cache health: read from the transcripts; requests this turn from the live log
@@ -1389,12 +1416,11 @@ export const register: Register = on => {
           {barRow('bar', [{ value: (ctxPct ?? 0) / 100, color: ctxColor }], inner)}
         </Box>
         {vitalsOpen && stats('s1', [
-          stat('cost', v.costUsd !== null ? 'COST' : 'COST (EST.)', usd(v.costUsd ?? total.usd), { color: 'claude' }),
-          stat('run', 'RUNNING FOR', clock(runFor), { sub: `since ${when(startedAt)}`, grow: 1.2 }),
+          // Right now: the session's live cost, today's part of it, and the last message's.
+          stat('cost', v.costUsd !== null ? 'COST' : 'COST (EST.)', usd(v.costUsd ?? total.usd), { color: 'claude', sub: 'whole session' }),
+          stat('today', 'TODAY', usd(todayU.usd * factor), { sub: `${todayU.calls} calls` }),
+          stat('last', 'LAST MESSAGE', rc && rc.costDelta !== null ? usd(rc.costDelta) : '—', { sub: rc ? dur(rc.durationMs) : 'none yet' }),
           ...(mainEx.active ? [stat('act', 'ACTIVE', clock(actMs), { sub: `${runFor > 0 ? Math.round((100 * actMs) / runFor) : 0}% of the time` })] : []),
-          stat('calls', 'REQUESTS', String(total.calls)),
-          // Cost and requests from the same snapshot, so the quotient is of one moment.
-          stat('cpr', isUpdating ? 'COST / REQUEST · UPDATING' : 'COST / REQUEST', perReq(snapCost, total.calls), isUpdating && hasScan ? { sub: `as of ${hhmm(sc.at)}` } : {}),
         ])}
         {/* The 5-hour and 7-day rows always show; with no reading yet (the host gave none) they read — until one lands. */}
         <Box key="limits" flexDirection="column">
@@ -1508,6 +1534,14 @@ export const register: Register = on => {
     const sessionBody = () => [
       // The total every row below adds up to: the snapshot's cost, marked while the live cost has moved past it.
       labelValue('tot', `TOTAL AT ${hasScan ? hhmm(sc.at) : '—'}${isUpdating ? ' · UPDATING' : ''}`, isLagging && hasScan ? `as of ${hhmm(sc.at)}` : '', { text: usd(snapCost), color: 'claude' }),
+      // The whole session: how long, how busy, how efficient. Cost and requests from one snapshot.
+      stats('whole', [
+        stat('run', 'RUNNING FOR', clock(runFor), { sub: `since ${when(startedAt)}`, grow: 1.2 }),
+        stat('act', 'ACTIVE', clock(actMs), { sub: `${runFor > 0 ? Math.round((100 * actMs) / runFor) : 0}% of the time` }),
+        stat('calls', 'REQUESTS', String(total.calls)),
+        stat('cpr', 'COST / REQUEST', perReq(snapCost, total.calls), isUpdating && hasScan ? { sub: `as of ${hhmm(sc.at)}` } : {}),
+        stat('hit', 'CACHE HIT', hitRate !== null ? `${Math.round(100 * hitRate)}%` : '—', { sub: 'input from the cache' }),
+      ]),
       // One row: the cost split, then the token counts, side by side until the card is too narrow for them.
       (hasScan || sessEx.tokens) && stats('s', [
         hasScan && stat('m', 'MAIN THREAD', usd(mainCost), { sub: `${perReq(mainCost, mainU.calls)} / request` }),
@@ -1590,7 +1624,7 @@ export const register: Register = on => {
             </Box>
             {!isNarrow && (
               <Box flexShrink={1} minWidth={0}>
-                <Text dimColor tabular wrap="truncate-end">{`${mins(t)} min · ${u.calls} calls`}</Text>
+                <Text dimColor tabular wrap="truncate-end">{`${mins(t)} min · ${u.calls} calls${t.files?.length ? ` · ${t.files.length} file${t.files.length === 1 ? '' : 's'}` : ''}`}</Text>
               </Box>
             )}
             {cell('u', COLW.cost, n(usd(u.usd * factor), { bold: true, color: isNow ? 'claude' : undefined }))}
@@ -1598,6 +1632,14 @@ export const register: Register = on => {
           {o &&
             (u.calls > 0 ? (
               <Box key="body" flexDirection="column" gap={1}>
+                {stats(`ts-${t.startedAt}`, [
+                  stat('cpc', 'COST / CALL', perReq(u.usd * factor, u.calls)),
+                  stat('tc', 'TOOL CALLS', String(Object.values(t.tools ?? {}).reduce((p, c) => p + c, 0))),
+                  stat('sa', 'SUB-AGENTS', String(t.agents.filter(r => r.usage.calls > 0).length)),
+                  stat('fl', 'FILES', String(t.files?.length ?? 0)),
+                ])}
+                {toolRow('tools', t.tools, 'TOOLS')}
+                {fileRows('files', t.files, 'FILES CHANGED')}
                 {taskEx.kinds && kinds('kinds', u, inner - 4)}
                 {taskTable(t)}
               </Box>
@@ -1612,7 +1654,7 @@ export const register: Register = on => {
     const tasksBody = () => [
       taskEx.hint && (
         <Text key="hint" size="footnote" dimColor>
-          A task runs from one mark_task to the next. Click a task to open or close it.
+          A task runs from one mark_task to the next, or starts after an hour’s break. Click a task to open or close it.
         </Text>
       ),
       ...shownTasks.map(taskCard),
@@ -1746,6 +1788,25 @@ export const register: Register = on => {
     ]
 
     // ---- last turn
+    // Tools by how often they ran, and the files edits changed: what a turn or a task actually did.
+    const toolRow = (key: string, m: Record<string, number> | undefined, label: string) => {
+      const list = Object.entries(m ?? {}).sort((p, q) => q[1] - p[1]).slice(0, 12)
+      return list.length === 0 ? null : (
+        <Box key={key} flexDirection="column">
+          {heading('h', label)}
+          <Text wrap="wrap">{list.map(([name, c]) => `${name} ×${c}`).join('   ')}</Text>
+        </Box>
+      )
+    }
+    const fileRows = (key: string, files: string[] | undefined, label: string) =>
+      !files?.length ? null : (
+        <Box key={key} flexDirection="column">
+          {heading('h', `${label} · ${files.length}`)}
+          {files.slice(-12).reverse().map(f => (
+            <Text key={f} dimColor wrap="truncate-start">{f.split('/').slice(-2).join('/')}</Text>
+          ))}
+        </Box>
+      )
     const turnBody = () =>
       rc === null
         ? [<Text key="none" dimColor>No finished turn yet.</Text>]
@@ -1755,11 +1816,12 @@ export const register: Register = on => {
               stat('c', 'COST ADDED', rc.costDelta !== null ? usd(rc.costDelta) : '—', { color: 'claude' }),
               stat('t', 'TOOL CALLS', String(rc.tools), { sub: `${rc.edits} edit${rc.edits === 1 ? '' : 's'}` }),
               stat('e', 'ERRORS', String(rc.errors), { color: rc.errors > 0 ? 'error' : undefined, sub: `${rc.agents} sub-agent${rc.agents === 1 ? '' : 's'}` }),
-              ...(rc.cacheHit != null ? [stat('h', 'CACHE HIT', `${Math.round(100 * rc.cacheHit)}%`, { sub: 'input from the cache' })] : []),
               ...(extrasOf(lay, 'turn').requests
                 ? [stat('q', 'REQUESTS', String(rc.requests ?? turnReqs), { color: (rc.requests ?? turnReqs) > tg.turnMax ? 'error' : undefined, sub: `limit ${tg.turnMax}` })]
                 : []),
             ]),
+            toolRow('tools', rc.byTool, 'TOOLS IT RAN'),
+            fileRows('files', rc.files, 'FILES CHANGED'),
           ]
 
     const WHY: Record<string, string> = { start: 'session start', idle: 'idle over 1 hour', summary: 'after a summary', other: 'other' }
@@ -1848,14 +1910,14 @@ export const register: Register = on => {
     }
     const errorsNow = events.filter(l => l.kind === 'error').length
     const byId: Record<string, () => ReturnType<typeof section>> = {
-      days: () => section('days', 'By Day', dayRows.length ? `${dayRows.length} day${dayRows.length === 1 ? '' : 's'}` : '—', daysBody),
-      session: () => section('session', 'Session Totals', hasScan ? `main ${usd(mainCost)} · agents ${usd(agentCost)}${isUpdating ? ' · updating' : ''}` : '—', sessionBody, costNote),
-      tasks: () => section('tasks', 'Tasks', `${shownTasks.length} · now: ${last?.label ?? '—'}`, tasksBody),
+      days: () => section('days', 'By Day', dayRows.length ? `per day · ${dayRows.length} day${dayRows.length === 1 ? '' : 's'}` : '—', daysBody),
+      session: () => section('session', 'Session Totals', hasScan ? `whole session · main ${usd(mainCost)} · agents ${usd(agentCost)}${isUpdating ? ' · updating' : ''}` : '—', sessionBody, costNote),
+      tasks: () => section('tasks', 'Tasks', `per task · ${shownTasks.length} · now: ${last?.label ?? '—'}`, tasksBody),
       requests: () => section('requests', 'Recent Requests', `${callList.length} seen`, requestsBody),
       agents: () => section('agents', 'Sub-Agents', agentCount === 0 ? 'none' : `${running} running`, agentsBody),
       gate: () => section('gate', 'Permissions', `${gt.allowed} ok · ${gt.asked} asked · ${gt.denied} denied`, gateBody),
       cache: () => section('cache', 'Cache', hitRate !== null ? `${Math.round(100 * hitRate)}% hit${ch ? ` · ${memWord}` : ''}` : '—', cacheBody, targetSteppers),
-      turn: () => section('turn', 'Last Turn', rc ? `${dur(rc.durationMs)}${rc.costDelta !== null ? ` · +${usd(rc.costDelta)}` : ''}` : '—', turnBody),
+      turn: () => section('turn', 'Last Turn', rc ? `your last message · ${dur(rc.durationMs)}${rc.costDelta !== null ? ` · +${usd(rc.costDelta)}` : ''}` : '—', turnBody),
       log: () => section('log', 'Activity', errorsNow > 0 ? `${events.length} events · ${errorsNow} errors` : `${events.length} events`, logBody),
     }
 

@@ -171,12 +171,12 @@ test(`${surface}: the Vitals stats row folds away`, async ($, on) => {
   mock.clock(on)
   await start($, on)
   const ui = await mount($, surface)
-  expect(await ui.find({ type: 'Text', text: /^RUNNING FOR$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^TODAY$/ })).toBeDefined()
   await ui.press({ key: 'sec-vitals' })
-  expect(await ui.find({ type: 'Text', text: /^RUNNING FOR$/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /^TODAY$/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /^CONTEXT/ })).toBeDefined()
   await ui.press({ key: 'sec-vitals' })
-  expect(await ui.find({ type: 'Text', text: /^RUNNING FOR$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^TODAY$/ })).toBeDefined()
 })
 
 // Requests this turn are shown in Last Turn only; Vitals carries no turn-count warning.
@@ -278,21 +278,21 @@ for (const surface of ['terminal', 'desktop'] as const)
     expect(await ui.find({ type: 'Text', text: /^CARDS$/ })).toBeUndefined()
     await ui.press({ key: 'settings' })
     expect(await ui.find({ type: 'Text', text: /^CARDS$/ })).toBeDefined()
-    // Untick Tasks (row 4): its section goes, its chip stays.
+    // Untick Tasks (row 2): its section goes, its chip stays.
     expect(await ui.find({ type: 'Text', text: /^Tasks$/ })).toBeDefined()
     const sections = async () => (await ui.findAll({ type: 'Button' })).map(b => (b as { key?: string }).key).filter(x => x?.startsWith('sec-') && x !== 'sec-vitals')
     if (surface === 'terminal') {
-      await ui.pointer({ type: 'down', x: 0, y: 4, button: 'left', in: 'section-chips' })
-      await ui.pointer({ type: 'up', x: 0, y: 4, button: 'left', in: 'section-chips' })
+      await ui.pointer({ type: 'down', x: 0, y: 2, button: 'left', in: 'section-chips' })
+      await ui.pointer({ type: 'up', x: 0, y: 2, button: 'left', in: 'section-chips' })
       expect(await ui.find({ key: 'sec-tasks' })).toBeUndefined()
       // A click on the title, not the box, ticks it too: it comes back, then goes again.
-      await ui.pointer({ type: 'down', x: 12, y: 4, button: 'left', in: 'section-chips' })
-      await ui.pointer({ type: 'up', x: 12, y: 4, button: 'left', in: 'section-chips' })
+      await ui.pointer({ type: 'down', x: 12, y: 2, button: 'left', in: 'section-chips' })
+      await ui.pointer({ type: 'up', x: 12, y: 2, button: 'left', in: 'section-chips' })
       expect(await ui.find({ key: 'sec-tasks' })).toBeDefined()
-      await ui.pointer({ type: 'down', x: 12, y: 4, button: 'left', in: 'section-chips' })
-      await ui.pointer({ type: 'up', x: 12, y: 4, button: 'left', in: 'section-chips' })
-      // Drag Activity (row 6) to the top.
-      await ui.pointer({ type: 'down', x: 6, y: 6, button: 'left', in: 'section-chips' })
+      await ui.pointer({ type: 'down', x: 12, y: 2, button: 'left', in: 'section-chips' })
+      await ui.pointer({ type: 'up', x: 12, y: 2, button: 'left', in: 'section-chips' })
+      // Drag Activity (row 5) to the top.
+      await ui.pointer({ type: 'down', x: 6, y: 5, button: 'left', in: 'section-chips' })
       await ui.pointer({ type: 'move', x: 6, y: 0, button: 'left', in: 'section-chips' })
       await ui.pointer({ type: 'up', x: 6, y: 0, button: 'left', in: 'section-chips' })
     } else {
@@ -333,17 +333,19 @@ test('desktop: a theme pick chooses a theme, and a Main extra flips', async ($, 
   expect(await ticked('theme-reader')).toBe(true)
   expect(await ticked('theme-app')).toBe(false)
   expect(await ticked('x-vitals-active')).toBe(false)
-  expect(await ui.find({ type: 'Text', text: /^ACTIVE$/ })).toBeUndefined()
+  // Session Totals always shows Active; the Main extra adds it to the Main card as well.
+  const actives = async () => (await ui.findAll({ type: 'Text', text: /^ACTIVE$/ })).length
+  const before = await actives()
   await ui.press({ key: 'x-vitals-active' })
   expect(await ticked('x-vitals-active')).toBe(true)
-  expect(await ui.find({ type: 'Text', text: /^ACTIVE$/ })).toBeDefined()
+  expect(await actives()).toBe(before + 1)
   await ui.press({ key: 'theme-app' })
   expect(await ticked('theme-app')).toBe(true)
 })
 
 test('a stored layout is cleaned: unknown ids dropped, new sections added last', () => {
   expect(cleanLayout({ order: ['log', 'nope', 'log', 'tasks'], hidden: ['x', 'gate'] })).toEqual({
-    order: ['log', 'tasks', 'turn', 'session', 'days', 'requests', 'agents', 'cache', 'gate'],
+    order: ['log', 'tasks', 'session', 'turn', 'days', 'requests', 'agents', 'cache', 'gate'],
     hidden: ['gate'],
   })
   expect(cleanLayout(null)).toEqual(defaultLayout())

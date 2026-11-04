@@ -123,6 +123,18 @@ A second tool, `context_breakdown`, returns the context window broken down as `/
 - Session Totals update after each turn, so during a long turn they trail the live task count.
 - A sub-agent's context size is the whole input of its latest request.
 
+## What each card is for
+
+| Card | Answers | Shows |
+| --- | --- | --- |
+| Main | Am I OK right now? | Context, plan limits, the session's live cost, today's cost, the last message's cost |
+| Session Totals | What has the whole session cost, and where did it go? | Running and active time, requests, cost per request, cache hit; cost by kind; who and which model |
+| Last Turn | What did my last message do? | Time, cost added, tool calls by tool, files changed, errors, requests against the limit |
+| Tasks | Which piece of work cost what? | One row per task (from one `mark_task` to the next, or after an hour's break): time, calls, files; open one for cost per call, tools, files and its cost breakdown |
+| By Day | When did I work, and how much each day? | Calls, active time, share of the session and cost per local day, with a range from today to 30 days |
+
+Each card's summary line names what it covers: whole session, your last message, per task, per day.
+
 ## Live page
 
 Session Watcher keeps one private page on claude.ai, **Session Watcher Live**, for all your sessions and conversations, so you can follow a session where the pane can't be drawn, such as a cloud session in the desktop app. The mod publishes the page's code once (and again only when the code changes). After each model request it writes the session's state into the page's own database, at most once every 10 seconds by default; an open page updates by itself.

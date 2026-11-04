@@ -36,8 +36,8 @@ const host = (on: On, saved?: unknown) => {
     if (saved && !version.has('sessions/sid1')) version.set('sessions/sid1', 1)
     if (x.action === 'get') {
       if (!version.has(key)) return { result: 'Not found', isError: true } as never
-      files.set(`${x.out_dir}/${key}.json`, JSON.stringify(key === 'sessions/sid1' && saved ? saved : {}))
-      return { result: `1 document saved: "${x.doc_id}" version ${version.get(key)}` } as never
+      const body = JSON.stringify({ id: x.doc_id, data: key === 'sessions/sid1' && saved ? saved : {}, version: version.get(key) })
+      return { result: `1 document from collection "${x.collection}":\n=== BEGIN ARTIFACT DB x ===\n${body}\n=== END ARTIFACT DB x ===` } as never
     }
     if (version.has(key) && x.if_version !== version.get(key)) return { result: `version_mismatch: current version ${version.get(key)}`, isError: true } as never
     version.set(key, (version.get(key) ?? 0) + 1)

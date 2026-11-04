@@ -2,7 +2,8 @@
 // `cacheWrite` is every cache write; `cacheWrite1h` the part written to the one-hour cache (absent in usage stored before 0.2.0).
 export type Usage = { input: number; cacheWrite: number; cacheWrite1h?: number; cacheRead: number; output: number; calls: number; usd: number }
 export type Row = { id: string; who: string; type: string; models: string[]; usage: Usage }
-export type Task = { label: string; startedAt: number; endedAt?: number; main: Row; agents: Row[] }
+/** `tools`: calls per tool name in the task; `files`: the files its edits changed. */
+export type Task = { label: string; startedAt: number; endedAt?: number; main: Row; agents: Row[]; tools?: Record<string, number>; files?: string[] }
 // Active time: `hist` is what the transcript held when last read; `ms` and `since` add the turns since.
 export type Active = { hist: number; ms: number; since: number | null; turns: string[] }
 export type Call = {
@@ -80,9 +81,9 @@ export type Tally = { allowed: number; asked: number; denied: number }
 export type Check = { at: number; tool: string; bucket: Bucket; verdict: 'allowed' | 'asked' | 'denied'; detail: string }
 export type Gate = { totals: Record<Bucket, Tally>; recent: Check[] }
 
-export type Turn = { startedAt: number; edits: number; errors: number; tools: number; costAtStart: number | null }
+export type Turn = { startedAt: number; edits: number; errors: number; tools: number; costAtStart: number | null; byTool?: Record<string, number>; files?: string[] }
 // cacheHit: cache read over all input of the turn's requests (main and sub-agents); absent in receipts stored before it.
-export type Receipt = { durationMs: number; agents: number; edits: number; errors: number; tools: number; costDelta: number | null; reason: string; requests?: number; cacheHit?: number | null }
+export type Receipt = { durationMs: number; agents: number; edits: number; errors: number; tools: number; costDelta: number | null; reason: string; requests?: number; cacheHit?: number | null; byTool?: Record<string, number>; files?: string[] }
 
 /** The pane's sections in order, and those ticked off; Vitals is always shown and not listed. */
 // theme: a THEMES id, absent for the app's own colours; targets: the limits the person has set in the Cache card's menu,

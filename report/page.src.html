@@ -226,6 +226,9 @@ function draw() {
   const ctxPct = v.ctxTokens !== null && ctxMax > 0 ? Math.round((100 * v.ctxTokens) / ctxMax) : v.ctxLimit > 0 ? null : v.ctxPct
   const ctxColor = ctxPct === null ? 'inactive' : ctxPct >= tg.ctxBad ? 'error' : ctxPct >= tg.ctxWarn ? 'warning' : 'success'
   const runFor = now - startedAt, actMs = S.active.hist + S.active.ms
+  const todayStart = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime() })()
+  const todayHours = (sc.hours || []).filter(x => x.at + 3600000 > todayStart)
+  const todayUsd = todayHours.reduce((a, x) => a + x.usage.usd, 0), todayCalls = todayHours.reduce((a, x) => a + x.usage.calls, 0)
   const mainEx = extrasOf('vitals')
   const memColor = !ch0 || ch0.memoryChars === null ? 'inactive' : ch0.memoryChars > tg.memFine ? 'error' : ch0.memoryChars > tg.memGood ? 'warning' : 'success'
   const memWord = memColor === 'error' ? 'Bad' : memColor === 'warning' ? 'Fine' : 'Good'
@@ -269,11 +272,11 @@ function draw() {
         barRow([{ value: (ctxPct ?? 0) / 100, color: ctxColor }]),
         ctxPct === null ? T('The window size comes from the live session; this copy was made without it.', 'foot dim') : null),
       vitalsOpen && stats([
-        stat(v.costUsd !== null ? 'Cost' : 'Cost (est.)', usd(v.costUsd ?? total.usd), { color: 'claude' }),
-        stat('Running for', clock(Math.max(runFor, Date.now() - startedAt)), { sub: `since ${when(startedAt)}`, since: startedAt, grow: 1.2 }),
+        // Right now: the session's live cost, today's share of it, and the last message's.
+        stat(v.costUsd !== null ? 'Cost' : 'Cost (est.)', usd(v.costUsd ?? total.usd), { color: 'claude', sub: 'whole session' }),
+        stat('Today', usd(todayUsd * factor), { sub: `${todayCalls} calls` }),
+        stat('Last message', rc && rc.costDelta !== null ? usd(rc.costDelta * factor) : '—', { sub: rc ? dur(rc.durationMs) : 'none yet' }),
         mainEx.active ? stat('Active', clock(actMs), { sub: `${runFor > 0 ? Math.round((100 * actMs) / runFor) : 0}% of the time` }) : null,
-        stat('Requests', String(total.calls)),
-        stat('Cost / request', perReq(snapCost, total.calls)),
       ]),
       h('div', { class: 'col' }, (lims.length ? lims.slice(0, 3) : [{ kind: 'five_hour', pct: 0, resetsAt: null, none: true }, { kind: 'seven_day', pct: 0, resetsAt: null, none: true }]).map(l => meterRow(
         l.kind === 'five_hour' ? '5-hour limit' : l.kind === 'seven_day' ? '7-day limit' : l.kind.replace(/_/g, ' '),
@@ -306,6 +309,14 @@ function draw() {
   const sessEx = extrasOf('session')
   const sessionBody = () => [
     labelValue(`Total at ${hhmm(sc.at)}`, '', { text: usd(snapCost), color: 'claude' }),
+    // The whole session: how long, how busy, how efficient.
+    stats([
+      stat('Running for', clock(Math.max(runFor, Date.now() - startedAt)), { sub: `since ${when(startedAt)}`, since: startedAt, grow: 1.2 }),
+      stat('Active', clock(actMs), { sub: `${runFor > 0 ? Math.round((100 * actMs) / runFor) : 0}% of the time` }),
+      stat('Requests', String(total.calls)),
+      stat('Cost / request', perReq(snapCost, total.calls)),
+      stat('Cache hit', hitRate !== null ? `${Math.round(100 * hitRate)}%` : '—', { sub: 'input from the cache' }),
+    ]),
     (hasScan || sessEx.tokens) && stats([hasScan && stat('Main thread', usd(mainCost), { sub: `${perReq(mainCost, mainU.calls)} / request` }), hasScan && stat('Sub-Agents', usd(agentCost), { sub: `${perReq(agentCost, agentU.calls)} / request` }),
       sessEx.tokens && stat('Fresh', k(fresh(total)), { sub: 'input + write + output' }), sessEx.tokens && stat('Cache read', k(total.cacheRead)), sessEx.tokens && stat('Weighted', k(weighted(total)), { sub: 'tokens by price' })]),
     kinds(total, inner, sessEx.tokens, hasScan ? snapCost : undefined),
@@ -338,9 +349,9 @@ function draw() {
     h('div', { class: 'row', style: 'flex-wrap:wrap' }, [1, 7, 30].map(nd => h('button', { class: 'btn', onclick: () => { dayRange = nd; save(); draw() } }, nd === 1 ? 'Today' : `${nd} days`))),
     T('Days before the range are added up in one Earlier row.', 'foot dim'))
   const daysBody = () => days.length === 0 ? [T('Reading the transcripts…', 'dim')] : [
-    table([{ id: 'd', label: 'Day', kind: 'free' }, { id: 'c', label: 'Calls', kind: 'num' }, isWide && { id: 'a', label: 'Active', kind: 'num' }, !isNarrow && { id: 'o', label: 'Output', kind: 'num' }, { id: 'u', label: 'Cost', kind: 'num' }],
-      [...inRange.map(d => ({ d: T(dayName(d.at), dayKey(d.at) === dayKey(Date.now()) ? 'b' : ''), c: n(String(d.u.calls), { dim: true }), a: n(dur(d.ms), { dim: true }), o: n(k(d.u.output), { dim: true }), u: n(usd(d.u.usd * factor), { bold: true }) })),
-       ...(earlier ? [{ d: T(`Earlier · ${earlier.n} day${earlier.n === 1 ? '' : 's'}, from ${dayName(earlier.at)}`, 'dim'), c: n(String(earlier.u.calls), { dim: true }), a: n(dur(earlier.ms), { dim: true }), o: n(k(earlier.u.output), { dim: true }), u: n(usd(earlier.u.usd * factor), { bold: true }) }] : [])]),
+    table([{ id: 'd', label: 'Day', kind: 'free' }, { id: 'c', label: 'Calls', kind: 'num' }, isWide && { id: 'a', label: 'Active', kind: 'num' }, !isNarrow && { id: 'o', label: 'Output', kind: 'num' }, { id: 's', label: 'Share', kind: 'num' }, { id: 'u', label: 'Cost', kind: 'num' }],
+      [...inRange.map(d => ({ s: n(`${Math.round((100 * d.u.usd) / (total.usd || 1))}%`, { dim: true }), d: T(dayName(d.at), dayKey(d.at) === dayKey(Date.now()) ? 'b' : ''), c: n(String(d.u.calls), { dim: true }), a: n(dur(d.ms), { dim: true }), o: n(k(d.u.output), { dim: true }), u: n(usd(d.u.usd * factor), { bold: true }) })),
+       ...(earlier ? [{ d: T(`Earlier · ${earlier.n} day${earlier.n === 1 ? '' : 's'}, from ${dayName(earlier.at)}`, 'dim'), c: n(String(earlier.u.calls), { dim: true }), a: n(dur(earlier.ms), { dim: true }), o: n(k(earlier.u.output), { dim: true }), s: n(`${Math.round((100 * earlier.u.usd) / (total.usd || 1))}%`, { dim: true }), u: n(usd(earlier.u.usd * factor), { bold: true }) }] : [])]),
     inRange.length === 0 ? T(dayRange === 1 ? 'Not used today yet.' : `Not used in the ${rangeName.toLowerCase()}.`, 'dim') : null,
     T(`Each day this session was used, in your local time, from the transcripts read at ${hhmm(sc.at)}. Days add up to Session Totals.`, 'foot dim'),
   ]
@@ -357,14 +368,18 @@ function draw() {
     const tw = weighted(u) || 1
     return h('div', { class: `card ${o ? 'open' : ''}` },
       h('div', { class: 'row' }, h('div', { class: 'grow' }, pressable([arrowRun(o), { text: t.label, bold: true, color: isNow ? 'claude' : undefined }, ...(isNow ? [{ text: '  now', dim: true }] : [])], () => { toggles = toggles.includes(t.startedAt) ? toggles.filter(x => x !== t.startedAt) : [...toggles, t.startedAt].slice(-60); save(); draw() })),
-        isNarrow ? null : T(`${mins(t)} min · ${u.calls} calls`, 'dim num trunc'), cellW(NUM_W, n(usd(u.usd * factor), { bold: true, color: isNow ? 'claude' : undefined }))),
-      o ? (u.calls > 0 ? h('div', { class: 'col gap' }, taskEx.kinds && kinds(u, inner - 4),
+        isNarrow ? null : T(`${mins(t)} min · ${u.calls} calls${(t.files || []).length ? ` · ${t.files.length} file${t.files.length === 1 ? '' : 's'}` : ''}`, 'dim num trunc'), cellW(NUM_W, n(usd(u.usd * factor), { bold: true, color: isNow ? 'claude' : undefined }))),
+      o ? (u.calls > 0 ? h('div', { class: 'col gap' },
+        stats([stat('Cost / call', perReq(u.usd * factor, u.calls)), stat('Tool calls', String(Object.values(t.tools || {}).reduce((a, c) => a + c, 0))), stat('Sub-Agents', String(t.agents.filter(r => r.usage.calls > 0).length)), stat('Files', String((t.files || []).length))]),
+        byToolList(t.tools).length > 0 && h('div', { class: 'col' }, heading('Tools'), h('div', { class: 'row', style: 'flex-wrap:wrap;gap:0 2ch' }, byToolList(t.tools).slice(0, 12).map(([name, c]) => h('span', {}, T(name), T(` ×${c}`, 'dim num'))))),
+        (t.files || []).length > 0 && h('div', { class: 'col' }, heading('Files changed'), t.files.slice(-12).reverse().map(f => h('div', { class: 'trunc dim', title: f }, fileName(f)))),
+        taskEx.kinds && kinds(u, inner - 4),
         table([{ id: 'sw', label: '', kind: 'mark', w: 1 }, { id: 'who', label: 'Who', kind: 'free' }, isWide && { id: 'm', label: 'Model', kind: 'text', w: 12 }, isWide && { id: 'c', label: 'Calls', kind: 'num' }, { id: 'w', label: 'Weight', kind: 'num' }, { id: 'u', label: 'Cost', kind: 'num' }],
           rows.map(r => ({ sw: swatch(whoColor(r)), who: r.type === 'main' ? 'Main thread' : r.who, m: T(r.models.map(modelName).join(', '), 'dim'), c: n(String(r.usage.calls), { dim: true }), w: n(`${Math.round((100 * weighted(r.usage)) / tw)}%`, { dim: true }), u: n(usd(r.usage.usd * factor), { bold: true }) })),
           inner - 4, splitRow(rows.map(r => ({ value: r.usage.usd, color: whoColor(r) })))))
         : T('No calls yet.', 'dim')) : null)
   }
-  const tasksBody = () => [taskEx.hint && T('A task runs from one mark_task to the next. Click a task to open or close it.', 'foot dim'), ...shownTasks.map(taskCard)]
+  const tasksBody = () => [taskEx.hint && T('A task runs from one mark_task to the next, or starts after an hour’s break. Click a task to open or close it.', 'foot dim'), ...shownTasks.map(taskCard)]
 
   // ---- recent requests
   const recent = callList.slice(-15).reverse(), reqTok = extrasOf('requests').tokens
@@ -399,13 +414,17 @@ function draw() {
   ]
 
   // ---- last turn
+  const byToolList = m => Object.entries(m || {}).sort((a, b) => b[1] - a[1])
+  const fileName = f => f.split('/').slice(-2).join('/')
   const turnBody = () => rc === null ? [T('No finished turn yet.', 'dim')] : [stats([
     stat('Took', dur(rc.durationMs)), stat('Cost added', rc.costDelta !== null ? usd(rc.costDelta * factor) : '—', { color: 'claude' }),
     stat('Tool calls', String(rc.tools), { sub: `${rc.edits} edit${rc.edits === 1 ? '' : 's'}` }),
     stat('Errors', String(rc.errors), { color: rc.errors > 0 ? 'error' : undefined, sub: `${rc.agents} sub-agent${rc.agents === 1 ? '' : 's'}` }),
-    rc.cacheHit != null ? stat('Cache hit', `${Math.round(100 * rc.cacheHit)}%`, { sub: 'input from the cache' }) : null,
     extrasOf('turn').requests ? stat('Requests', String(rc.requests), { color: rc.requests > tg.turnMax ? 'error' : undefined, sub: `limit ${tg.turnMax}` }) : null,
-  ])]
+  ]),
+    byToolList(rc.byTool).length > 0 && h('div', { class: 'col' }, heading('Tools it ran'), h('div', { class: 'row', style: 'flex-wrap:wrap;gap:0 2ch' }, byToolList(rc.byTool).map(([name, c]) => h('span', {}, T(name), T(` ×${c}`, 'dim num'))))),
+    (rc.files || []).length > 0 && h('div', { class: 'col' }, heading(`Files changed · ${rc.files.length}`), rc.files.slice(0, 12).map(f => h('div', { class: 'trunc dim', title: f }, fileName(f)))),
+  ]
 
   // ---- cache
   const WHY = { start: 'session start', idle: 'idle over 1 hour', summary: 'after a summary', other: 'other' }
@@ -427,20 +446,20 @@ function draw() {
 
   const errorsNow = events.filter(l => l.kind === 'error').length
   const byId = {
-    days: () => section('days', 'By Day', days.length ? `${rangeName.toLowerCase()} · ${usd(inRange.reduce((a, d) => a + d.u.usd, 0) * factor)}` : '—', daysBody, daySteppers),
-    session: () => section('session', 'Session Totals', hasScan ? `main ${usd(mainCost)} · agents ${usd(agentCost)}` : '—', sessionBody, costNote),
-    tasks: () => section('tasks', 'Tasks', `${shownTasks.length} · now: ${last?.label ?? '—'}`, tasksBody),
+    days: () => section('days', 'By Day', days.length ? `per day · ${rangeName.toLowerCase()} · ${usd(inRange.reduce((a, d) => a + d.u.usd, 0) * factor)}` : '—', daysBody, daySteppers),
+    session: () => section('session', 'Session Totals', hasScan ? `whole session · main ${usd(mainCost)} · agents ${usd(agentCost)}` : '—', sessionBody, costNote),
+    tasks: () => section('tasks', 'Tasks', `per task · ${shownTasks.length} · now: ${last?.label ?? '—'}`, tasksBody),
     requests: () => section('requests', 'Recent Requests', `${callList.length} seen`, requestsBody),
     agents: () => section('agents', 'Sub-Agents', agentCount === 0 ? 'none' : `${running} running`, agentsBody),
     gate: () => section('gate', 'Permissions', `${gt.allowed} ok · ${gt.asked} asked · ${gt.denied} denied`, gateBody),
     cache: () => section('cache', 'Cache', hitRate !== null ? `${Math.round(100 * hitRate)}% hit${ch0 && ch0.memoryChars !== null ? ` · ${memWord}` : ''}` : '—', cacheBody, targetSteppers),
-    turn: () => section('turn', 'Last Turn', rc ? `${dur(rc.durationMs)}${rc.costDelta !== null ? ` · +${usd(rc.costDelta * factor)}` : ''}` : '—', turnBody),
+    turn: () => section('turn', 'Last Turn', rc ? `your last message · ${dur(rc.durationMs)}${rc.costDelta !== null ? ` · +${usd(rc.costDelta * factor)}` : ''}` : '—', turnBody),
     log: () => section('log', 'Activity', errorsNow > 0 ? `${events.length} events · ${errorsNow} errors` : `${events.length} events`, logBody),
   }
   root.replaceChildren(
     h('div', { class: 'top' }, T(`Updated ${when(now)}:${String(new Date(now).getSeconds()).padStart(2, '0')}`, 'b'), T(sessions.length ? 'Live from the Session Watcher mod.' : 'Published by the Session Watcher mod.', 'src')),
     sessions.length > 1 ? h('label', { class: 'row picker' }, T('Session', 'h'), h('select', { onchange: ev => { pick = ev.target.value; save(); choose() } },
-      sessions.map(x => h('option', { value: x.id, selected: x.id === S.sessionId ? '' : undefined }, `${when(x.updatedAt)} · ${x.sessionStart ? `since ${when(x.sessionStart)}` : x.id.slice(0, 8)}${x.model ? ` · ${modelName(x.model)}` : ''}`)))) : null,
+      sessions.map(x => h('option', { value: x.id, selected: x.id === S.sessionId ? '' : undefined }, `${when(x.updatedAt)} · ${x.sessionStart ? `since ${when(x.sessionStart)}` : x.id.slice(0, 8)}${x.model ? ` · ${modelName(x.model)}` : ''}`)))) : '',
     vitalsCard,
     ...lay.order.filter(id => !lay.hidden.includes(id)).map(id => byId[id]?.()),
     T((isCalibrated ? 'Cost is Claude Code’s own total. Each row’s cost is its tokens at list price, scaled so the rows add up to that total.' : 'Cost is an estimate at list price until Claude Code reports the session cost.') + ' Cost per request = cost ÷ requests, both from the same transcript read. Weighted = input ×1 + cache write ×1.25 (five-minute cache) or ×2 (one-hour cache) + cache read ×0.1 + output ×5. Fresh = input + cache write + output.', 'foot dim'),
