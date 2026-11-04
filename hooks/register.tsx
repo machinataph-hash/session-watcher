@@ -412,7 +412,7 @@ const publishLive = async ($: EngineInterface) => {
       if (live.url && failed(r)) r = await send()
       // A kept link this account cannot open (a page another account published, or one deleted): forget it and
       // publish this account's own page.
-      if (live.url && failed(r) && /not found|not been shared|not readable/i.test(textOf(r))) {
+      if (live.url && failed(r) && /not found|not been shared|not readable|deleted|no longer have write access/i.test(textOf(r))) {
         live.url = ''
         await $.store.set(SHARED, { url: '', hash: '' }).catch(() => undefined)
         r = await send()
