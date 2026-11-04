@@ -25,7 +25,7 @@ const priceOf = (model: string): [number, number] => PRICES[familyOf(model)] ?? 
 
 // A cache write costs by how long the cache keeps it: five minutes at 1.25x input, one hour at 2x.
 // Counted in input-token units; usage stored before the split was kept has no cacheWrite1h and prices at 1.25x.
-type Tokens = { input: number; cacheWrite: number; cacheWrite1h?: number; cacheRead: number; output: number }
+export type Tokens = { input: number; cacheWrite: number; cacheWrite1h?: number; cacheRead: number; output: number }
 export const writeCost = (u: Tokens) => {
   const long = Math.min(u.cacheWrite1h ?? 0, u.cacheWrite)
   return (u.cacheWrite - long) * 1.25 + long * 2
@@ -75,8 +75,11 @@ export const rowUse = (r: Row, model: string, u: Usage): Row => ({
 export const taskTotal = (t: Task): Usage => t.agents.reduce((acc, a) => sum(acc, a.usage), t.main.usage)
 
 /** The scan with each model's list-price estimate filled in. */
-export const priceScan = (s: Scan): Scan => ({
-  ...s,
+export const priceScan = (s: Scan & { rawHours?: { at: number; ms: number; byModel: Record<string, Tokens & { calls: number }> }[] }): Scan => ({
+  ...Object.fromEntries(Object.entries(s).filter(([key]) => key !== 'rawHours')) as Scan,
+  ...(s.rawHours
+    ? { hours: s.rawHours.map(h => ({ at: h.at, ms: h.ms, usage: Object.entries(h.byModel).reduce((acc, [m, u]) => sum(acc, { ...u, cacheWrite1h: u.cacheWrite1h ?? 0, usd: usdOf(m, u) }), empty()) })) }
+    : {}),
   byModel: Object.fromEntries(
     Object.entries(s.byModel).map(([m, v]) => [m, { main: { ...v.main, usd: usdOf(m, v.main) }, agents: { ...v.agents, usd: usdOf(m, v.agents) } }]),
   ),
@@ -266,6 +269,7 @@ export const estimateLimit = (m: LimitModel, l: LimitReading): number | null => 
 export const SECTIONS: { id: string; title: string }[] = [
   { id: 'turn', title: 'Last Turn' },
   { id: 'session', title: 'Session Totals' },
+  { id: 'days', title: 'By Day' },
   { id: 'requests', title: 'Recent Requests' },
   { id: 'tasks', title: 'Tasks' },
   { id: 'agents', title: 'Sub-Agents' },

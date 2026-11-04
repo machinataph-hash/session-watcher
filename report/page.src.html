@@ -57,6 +57,8 @@ button.btn:hover, button.p:hover { color: var(--claude); }
 .gridrow > div { flex: 1 1 0; min-width: 0; }
 .ind { padding-left: 1ch; }
 .warn { font-size: 11px; }
+.picker { gap: 1ch; }
+.picker select { font: inherit; color: var(--fg); background: var(--card); border: 1px solid var(--border); border-radius: 5px; padding: 2px 6px; min-width: 0; flex: 1 1 auto; }
 .note-sample { color: var(--warning); font-size: 11px; }
 </style>
 <div id="sw" aria-live="polite"></div>
@@ -64,7 +66,10 @@ button.btn:hover, button.p:hover { color: var(--claude); }
 <script id="state" type="application/json">__STATE__</script>
 <script>
 (() => {
-const S = JSON.parse(document.getElementById('state').textContent)
+// The state built into the page, replaced by the page's database once it answers: one document per session
+// (sessions/<id>) and the newest plan-limit reading from any session (limits/latest).
+let S = JSON.parse(document.getElementById('state').textContent)
+let sessions = [], LIM = null
 const { k, usd, clock, dur, hhmm, when, untilReset, modelName, familyOf, weighted, writeCost, fresh, sum, empty, taskTotal, scanTotal, newTask, EXTRAS, SECTIONS, TARGETS, THEMES, BUCKETS, targetsOf, canStep, applyLayoutMessage } = SW
 const root = document.getElementById('sw')
 // Per-viewer settings, as the pane keeps them in $.state: open sections, layout (order, hidden, theme, extras).
@@ -75,7 +80,9 @@ let open = saved.open || ['session', 'tasks']
 let lay = Object.assign({ order: S.order || SECTIONS.map(s => s.id), hidden: S.hidden || [], cards: {} }, saved.lay || {})
 for (const s of SECTIONS) if (!lay.order.includes(s.id)) lay.order.push(s.id)
 let toggles = saved.toggles || []
-const save = () => { try { localStorage.setItem(KEY, JSON.stringify({ open, lay, toggles })) } catch {} }
+let pick = saved.pick || null
+let dayRange = Math.min(30, Math.max(1, Number(saved.dayRange) || 7))
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify({ open, lay, toggles, pick, dayRange })) } catch {} }
 const isOpen = id => open.includes(id)
 const flip = id => { open = isOpen(id) ? open.filter(x => x !== id) : [...open, id]; save(); draw() }
 const extrasOf = card => Object.fromEntries((EXTRAS[card] || []).map(d => [d.key, (lay.cards[card] || {})[d.key] ?? d.isOn]))
@@ -213,6 +220,8 @@ function draw() {
   ]
 
   // ---- Main card
+  const isShared = LIM && Array.isArray(LIM.limits) && LIM.at >= now
+  const lims = isShared ? LIM.limits : v.limits, limAt = isShared ? LIM.at : now, limFrom = isShared ? LIM.session : S.sessionId
   const ctxMax = v.ctxLimit > 0 ? v.ctxLimit : v.ctxWindow
   const ctxPct = v.ctxTokens !== null && ctxMax > 0 ? Math.round((100 * v.ctxTokens) / ctxMax) : v.ctxLimit > 0 ? null : v.ctxPct
   const ctxColor = ctxPct === null ? 'inactive' : ctxPct >= tg.ctxBad ? 'error' : ctxPct >= tg.ctxWarn ? 'warning' : 'success'
@@ -266,10 +275,11 @@ function draw() {
         stat('Requests', String(total.calls)),
         stat('Cost / request', perReq(snapCost, total.calls)),
       ]),
-      h('div', { class: 'col' }, (v.limits.length ? v.limits.slice(0, 3) : [{ kind: 'five_hour', pct: 0, resetsAt: null, none: true }, { kind: 'seven_day', pct: 0, resetsAt: null, none: true }]).map(l => meterRow(
+      h('div', { class: 'col' }, (lims.length ? lims.slice(0, 3) : [{ kind: 'five_hour', pct: 0, resetsAt: null, none: true }, { kind: 'seven_day', pct: 0, resetsAt: null, none: true }]).map(l => meterRow(
         l.kind === 'five_hour' ? '5-hour limit' : l.kind === 'seven_day' ? '7-day limit' : l.kind.replace(/_/g, ' '),
         l.none ? 0 : (l.est ?? l.pct) / 100, l.pct >= tg.limBad ? 'error' : l.pct >= tg.limWarn ? 'warning' : 'suggestion',
-        n(l.none ? '—' : l.est != null ? `${l.est.toFixed(2)}%` : `${Math.round(l.pct)}%`, { bold: true }), l.resetsAt ? `↻ ${untilReset(Math.max(0, l.resetsAt - now))}` : ''))),
+        n(l.none ? '—' : l.est != null ? `${l.est.toFixed(2)}%` : `${Math.round(l.pct)}%`, { bold: true }), l.resetsAt ? `↻ ${untilReset(Math.max(0, l.resetsAt - Date.now()))}` : '')),
+        T(`Plan limits are your account’s, shared by every session: the newest reading${limAt ? `, ${when(limAt)}` : ''}${limFrom && limFrom !== S.sessionId ? ', from another session' : ''}.`, 'foot dim')),
     ],
   })
 
@@ -310,6 +320,30 @@ function draw() {
       h('button', { class: 'btn', onclick: ev => copy(ev, callsCsv()) }, `Copy ${callList.length} requests (CSV)`), T('', 'foot dim copied')),
   ]
   const costNote = () => T(`Main card shows the live cost. This card shows the cost from the last log scan (as of ${hasScan ? hhmm(sc.at) : '—'}), which splits main thread and sub-agents. The gap is spend since that scan; it closes on the next scan.`, 'foot dim')
+
+  // ---- by day: the transcripts' hours grouped by this viewer's local day
+  const dayKey = ms => { const d = new Date(ms); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
+  const days = Object.values((sc.hours || []).reduce((acc, x) => { const key = dayKey(x.at); const d = acc[key] || (acc[key] = { key, at: x.at, ms: 0, u: empty() }); d.ms += x.ms; d.u = sum(d.u, x.usage); return acc }, {})).sort((a, b) => b.at - a.at)
+  const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  const dayName = ms => { const d = new Date(ms); return `${DAYS[d.getDay()]} ${MON[d.getMonth()]} ${d.getDate()}` }
+  // The range: today only (1) up to the last 30 days; anything older is one Earlier row, so a session of any
+  // length still adds up to Session Totals.
+  const since = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - (dayRange - 1)); return d.getTime() })()
+  const inRange = days.filter(d => d.at >= since), older = days.filter(d => d.at < since)
+  const earlier = older.length ? { key: 'earlier', at: older.at(-1).at, ms: older.reduce((a, d) => a + d.ms, 0), u: older.reduce((a, d) => sum(a, d.u), empty()), n: older.length } : null
+  const rangeName = dayRange === 1 ? 'Today' : `Last ${dayRange} days`
+  const daySteppers = () => h('div', { class: 'col gap' }, heading('Range'),
+    h('div', { class: 'row' }, h('input', { type: 'range', min: '1', max: '30', step: '1', value: String(dayRange), class: 'grow', 'aria-label': 'Days shown',
+      oninput: ev => { dayRange = Number(ev.target.value); save(); draw() } }), cellW(10, T(rangeName, 'num b'))),
+    h('div', { class: 'row', style: 'flex-wrap:wrap' }, [1, 7, 30].map(nd => h('button', { class: 'btn', onclick: () => { dayRange = nd; save(); draw() } }, nd === 1 ? 'Today' : `${nd} days`))),
+    T('Days before the range are added up in one Earlier row.', 'foot dim'))
+  const daysBody = () => days.length === 0 ? [T('Reading the transcripts…', 'dim')] : [
+    table([{ id: 'd', label: 'Day', kind: 'free' }, { id: 'c', label: 'Calls', kind: 'num' }, isWide && { id: 'a', label: 'Active', kind: 'num' }, !isNarrow && { id: 'o', label: 'Output', kind: 'num' }, { id: 'u', label: 'Cost', kind: 'num' }],
+      [...inRange.map(d => ({ d: T(dayName(d.at), dayKey(d.at) === dayKey(Date.now()) ? 'b' : ''), c: n(String(d.u.calls), { dim: true }), a: n(dur(d.ms), { dim: true }), o: n(k(d.u.output), { dim: true }), u: n(usd(d.u.usd * factor), { bold: true }) })),
+       ...(earlier ? [{ d: T(`Earlier · ${earlier.n} day${earlier.n === 1 ? '' : 's'}, from ${dayName(earlier.at)}`, 'dim'), c: n(String(earlier.u.calls), { dim: true }), a: n(dur(earlier.ms), { dim: true }), o: n(k(earlier.u.output), { dim: true }), u: n(usd(earlier.u.usd * factor), { bold: true }) }] : [])]),
+    inRange.length === 0 ? T(dayRange === 1 ? 'Not used today yet.' : `Not used in the ${rangeName.toLowerCase()}.`, 'dim') : null,
+    T(`Each day this session was used, in your local time, from the transcripts read at ${hhmm(sc.at)}. Days add up to Session Totals.`, 'foot dim'),
+  ]
 
   // ---- tasks
   const taskEx = extrasOf('tasks')
@@ -393,6 +427,7 @@ function draw() {
 
   const errorsNow = events.filter(l => l.kind === 'error').length
   const byId = {
+    days: () => section('days', 'By Day', days.length ? `${rangeName.toLowerCase()} · ${usd(inRange.reduce((a, d) => a + d.u.usd, 0) * factor)}` : '—', daysBody, daySteppers),
     session: () => section('session', 'Session Totals', hasScan ? `main ${usd(mainCost)} · agents ${usd(agentCost)}` : '—', sessionBody, costNote),
     tasks: () => section('tasks', 'Tasks', `${shownTasks.length} · now: ${last?.label ?? '—'}`, tasksBody),
     requests: () => section('requests', 'Recent Requests', `${callList.length} seen`, requestsBody),
@@ -403,7 +438,9 @@ function draw() {
     log: () => section('log', 'Activity', errorsNow > 0 ? `${events.length} events · ${errorsNow} errors` : `${events.length} events`, logBody),
   }
   root.replaceChildren(
-    h('div', { class: 'top' }, T(`Updated ${when(now)}:${String(new Date(now).getSeconds()).padStart(2, '0')}`, 'b'), T('Published by the Session Watcher mod after each request.', 'src')),
+    h('div', { class: 'top' }, T(`Updated ${when(now)}:${String(new Date(now).getSeconds()).padStart(2, '0')}`, 'b'), T(sessions.length ? 'Live from the Session Watcher mod.' : 'Published by the Session Watcher mod.', 'src')),
+    sessions.length > 1 ? h('label', { class: 'row picker' }, T('Session', 'h'), h('select', { onchange: ev => { pick = ev.target.value; save(); choose() } },
+      sessions.map(x => h('option', { value: x.id, selected: x.id === S.sessionId ? '' : undefined }, `${when(x.updatedAt)} · ${x.sessionStart ? `since ${when(x.sessionStart)}` : x.id.slice(0, 8)}${x.model ? ` · ${modelName(x.model)}` : ''}`)))) : null,
     vitalsCard,
     ...lay.order.filter(id => !lay.hidden.includes(id)).map(id => byId[id]?.()),
     T((isCalibrated ? 'Cost is Claude Code’s own total. Each row’s cost is its tokens at list price, scaled so the rows add up to that total.' : 'Cost is an estimate at list price until Claude Code reports the session cost.') + ' Cost per request = cost ÷ requests, both from the same transcript read. Weighted = input ×1 + cache write ×1.25 (five-minute cache) or ×2 (one-hour cache) + cache read ×0.1 + output ×5. Fresh = input + cache write + output.', 'foot dim'),
@@ -419,6 +456,22 @@ async function copy(ev, text) {
   catch { if (note) note.textContent = 'Copy failed: your browser refused the clipboard.' }
 }
 draw()
+// The page's database: every session's state, newest first, and the shared plan limits. Without it the state
+// built into the page shows.
+function choose() {
+  const x = sessions.find(d => d.id === pick) || sessions[0]
+  if (x && x.state) S = x.state
+  draw()
+}
+;(async () => {
+  const db = typeof claude === 'undefined' ? null : await claude.use('db').catch(() => null)
+  if (!db) return
+  db.collection('sessions').orderBy('updatedAt', 'desc').limit(12).onSnapshot(snap => {
+    sessions = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(x => x.state)
+    choose()
+  }, () => {})
+  db.doc('limits/latest').onSnapshot(snap => { LIM = snap.exists ? snap.data() : null; draw() }, () => {})
+})()
 let w = root.clientWidth
 new ResizeObserver(() => { if (root.clientWidth !== w) { w = root.clientWidth; draw() } }).observe(root)
 })()

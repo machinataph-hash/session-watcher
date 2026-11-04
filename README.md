@@ -125,7 +125,15 @@ A second tool, `context_breakdown`, returns the context window broken down as `/
 
 ## Live page
 
-Session Watcher also publishes the pane as a private page on claude.ai, so you can follow a session where the pane can't be drawn, such as a cloud session in the desktop app. After each model request it writes its state into [`report/page.html`](report/page.html) and publishes it with the Artifact tool, at most once every 10 seconds by default. The refresh rate is a preference: set it from 1 to 20 seconds with `/session-watcher live <seconds>` or the − / + under Live page refresh in the pane's Main card ⚙, and it is kept for later sessions. 1 second is allowed with a warning: the page then republishes after almost every request, which your browser or claude.ai may not keep up with. Pick what your setup can handle. The page's own ⚙ shows the rate but cannot change it, since the page has no way to reach the mod; requests inside that wait are published when it ends, so the page never stays behind. The first publish puts the link in Activity and in a toast; later ones update the same page, and an open page picks up the update by itself.
+Session Watcher keeps one private page on claude.ai, **Session Watcher Live**, for all your sessions and conversations, so you can follow a session where the pane can't be drawn, such as a cloud session in the desktop app. The mod publishes the page's code once (and again only when the code changes). After each model request it writes the session's state into the page's own database, at most once every 10 seconds by default; an open page updates by itself.
+
+- **Every session and conversation.** Each session has its own record, keyed by its session id. A picker at the top of the page switches between them, newest first.
+- **Plan limits from one source.** The 5-hour and 7-day limits are your account's, shared by every session. Each session writes its latest reading to one shared record, and every page shows the newest one with its time.
+- **Survives restarts.** Requests, tasks, permissions and activity are kept in the page's database; after a restart or reload the mod reads them back, so a session that runs for days keeps its history.
+- **By Day.** The transcripts' hours grouped by your local day: calls, active time and cost per day. Its ⚙ sets the range from today only to the last 30 days; older days are added up in one Earlier row, so the rows always add up to Session Totals.
+- The mod finds the shared page by its title, so a new session or a new container uses the same page; pin it once.
+
+The refresh rate is a preference: set it from 1 to 20 seconds with `/session-watcher live <seconds>` or the − / + under Live page refresh in the pane's Main card ⚙, and it is kept for later sessions. 1 second is allowed with a warning.
 
 <p align="center">
   <img src="docs/page-frostwerk.png" alt="The live page in the Frostwerk theme: Main card, Session Totals, Tasks and Recent Requests" width="260">

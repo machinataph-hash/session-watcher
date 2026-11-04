@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { LimitModel } from './core'
+import type { LimitModel, Tokens } from './core'
 import type { Active, AgentCard, CacheHealth, Call, Check, Gate, Layout, Limit, LogLine, Receipt, Row, Scan, Task, Turn, Usage, Vitals } from '../types'
 import {
   BUCKETS,
@@ -199,7 +199,7 @@ const readTranscript = async ($: EngineInterface) => {
   if (!id) return
   const r = await $.process.run(['python3', '-I', `${$.plugin.root}/hooks/scan.py`, id], { timeoutMs: 120000 }).catch(() => null)
   if (!r || r.exitCode !== 0) return
-  let got: { ms?: number; byModel?: Scan['byModel']; cache?: CacheHealth; missing?: boolean }
+  let got: { ms?: number; byModel?: Scan['byModel']; cache?: CacheHealth; hours?: { at: number; ms: number; byModel: Record<string, Tokens & { calls: number }> }[]; missing?: boolean }
   try {
     got = JSON.parse(r.stdout)
   } catch {
@@ -208,7 +208,7 @@ const readTranscript = async ($: EngineInterface) => {
   if (got.missing || !got.byModel) return
   const byModel = got.byModel
   const cost = await $.session.usage().then(u => u.cost?.usd ?? null).catch(() => null)
-  await update($, scan, () => priceScan({ at, byModel, costUsd: cost, cache: got.cache }))
+  await update($, scan, () => priceScan({ at, byModel, costUsd: cost, cache: got.cache, rawHours: got.hours }))
   await update($, active, a => ({ ...a, hist: got.ms ?? 0, ms: 0, since: a.turns.length > 0 ? at : null }))
 }
 
@@ -256,14 +256,78 @@ const LIVE_WARN_S = 2
 const LIVE_WARNING = '1s republishes after almost every request; your browser or claude.ai may lag. Raise it if the page stutters.'
 const LIVE_MAX_S = 20
 const liveEvery = atom({ plugin: 'session-watcher', key: 'liveEvery' } as const, 10)
-const LIVE_URLS = 'liveUrls'
-const live = { cfg: LIVE_DEFAULT, last: 0, timer: null as { cancel: () => void } | null, isBusy: false, isDirty: false, path: '', url: '', sid: '' }
-const isLiveCall = (tool: string, input: unknown) => tool === 'Artifact' && live.path !== '' && (input as { file_path?: unknown } | null)?.file_path === live.path
+// One shared page for every session and conversation. Its code is published only when report/page.html changes;
+// after each request the mod writes this session's state into the page's database (sessions/<session id>) and the
+// newest plan-limit reading into limits/latest, and every open page shows them live. The page finds itself by title.
+const SHARED = 'sharedPage'
+const PAGE_TITLE = 'Session Watcher Live'
+const PAGE_CAPS = { db: {} }
+type Shared = { url: string; hash: string }
+const live = { cfg: LIVE_DEFAULT, last: 0, timer: null as { cancel: () => void } | null, isBusy: false, isDirty: false, dir: '', url: '', hash: '', sid: '', isRestored: false }
+const URL_RE = /https:\/\/claude\.ai\/(?:code\/)?artifact\/[\w-]+/
+// The mod's own calls stay out of the Permissions and Activity counts.
+const isLiveCall = (tool: string, input: unknown) =>
+  live.dir !== '' && (tool === 'Artifact' || tool === 'ArtifactData') && String((input as { file_path?: unknown; url?: unknown; action?: unknown } | null)?.file_path ?? '').startsWith(live.dir)
+    || (tool === 'ArtifactData' && live.url !== '' && (input as { url?: unknown } | null)?.url === live.url)
+    || (tool === 'Artifact' && (input as { action?: unknown } | null)?.action === 'list' && live.url === '')
 
 const liveSnapshot = async ($: EngineInterface) => {
   const [t, c, a, s, v, ag, g, r, l, lay] = await Promise.all([read($, tasks), read($, calls), read($, active), read($, scan), read($, vitals), read($, agents), read($, gate), read($, receipt), read($, log), read($, layout)])
   const now = await $.clock.now()
-  return { exportedAt: now, sessionStart: sessionStart ?? t[0]?.startedAt ?? now, tasks: t, calls: c.slice(-500), active: { ...a, ms: activeMs(a, now) - (a.hist ?? 0), since: null }, scan: s, vitals: v, agents: ag, gate: g, receipt: r, log: l, order: lay.order, hidden: lay.hidden, liveEveryS: live.cfg.everyS }
+  return { exportedAt: now, sessionId: live.sid, sessionStart: sessionStart ?? t[0]?.startedAt ?? now, tasks: t, calls: c.slice(-300), active: { ...a, ms: activeMs(a, now) - (a.hist ?? 0), since: null }, scan: s, vitals: v, agents: ag.slice(-40), gate: g, receipt: r, log: l.slice(-60), order: lay.order, hidden: lay.hidden, liveEveryS: live.cfg.everyS }
+}
+
+type ToolAnswer = { deny?: string; text?: string; isError?: boolean; result?: unknown }
+const textOf = (r: ToolAnswer) => r.deny ?? r.text ?? (typeof r.result === 'string' ? r.result : JSON.stringify(r.result ?? ''))
+const failed = (r: ToolAnswer) => r.deny !== undefined || r.isError === true
+const hashOf = (text: string) => {
+  let h = 2166136261
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619)
+  return (h >>> 0).toString(36)
+}
+
+// The shared page's link: kept in the store; else the newest artifact titled PAGE_TITLE; else none yet.
+const findPage = async ($: EngineInterface): Promise<Shared | null> => {
+  const kept = (await $.store.get(SHARED).catch(() => undefined)) as Shared | undefined
+  if (kept?.url) return kept
+  const r = (await $.tool.call({ tool: 'Artifact', action: 'list', limit: 50 } as never)) as ToolAnswer
+  if (failed(r)) return null
+  const row = textOf(r).split('\n').find(x => x.includes(`${PAGE_TITLE} —`) || x.includes(`${PAGE_TITLE} -`))
+  const url = row ? URL_RE.exec(row)?.[0] : undefined
+  return url ? { url, hash: '' } : null
+}
+
+// After a restart the in-memory lists are empty: read this session's last saved state back from the page.
+const restore = async ($: EngineInterface) => {
+  live.isRestored = true
+  if (!live.url) return
+  const out = `${live.dir}/restore`
+  const r = (await $.tool.call({ tool: 'ArtifactData', action: 'get', url: live.url, collection: 'sessions', doc_id: live.sid, out_dir: out } as never)) as ToolAnswer
+  if (failed(r)) return
+  const doc = await $.fs.read(`${out}/sessions/${live.sid}.json`).then(t => JSON.parse(t) as { data?: { state?: Record<string, unknown> }; state?: Record<string, unknown> }).catch(() => null)
+  const st = (doc?.data?.state ?? doc?.state) as { calls?: Call[]; tasks?: Task[]; gate?: Gate; log?: LogLine[]; receipt?: Receipt | null; agents?: AgentCard[] } | undefined
+  if (!st) return
+  // What this process saw since it started goes after what was saved before it: older saved rows first.
+  const before = <T extends { at: number }>(saved: T[] | undefined, here: T[]) => [...(saved ?? []).filter(x => x.at < (here[0]?.at ?? Infinity)), ...here]
+  await update($, calls, l => before(st.calls, l).slice(-500))
+  await update($, log, l => before(st.log, l).slice(-100))
+  if (st.tasks?.length)
+    await update($, tasks, l => {
+      if (l.length !== 1) return l
+      const was = st.tasks!.at(-1)!, now = l[0]!
+      return [...st.tasks!.slice(0, -1), { ...was, main: rowUse(was.main, now.main.models[0] ?? '', now.main.usage), agents: [...was.agents, ...now.agents] }]
+    })
+  if (st.gate)
+    await update($, gate, g => ({
+      totals: Object.fromEntries(Object.entries(g.totals).map(([b, t]) => {
+        const w = (st.gate!.totals as Record<string, typeof t>)[b]
+        return [b, w ? { allowed: t.allowed + w.allowed, asked: t.asked + w.asked, denied: t.denied + w.denied } : t]
+      })) as Gate['totals'],
+      recent: before(st.gate!.recent, g.recent).slice(-20),
+    }))
+  if (st.receipt) await update($, receipt, x => x ?? st.receipt!)
+  if (st.agents?.length) await update($, agents, l => [...st.agents!.filter(x => !l.some(y => y.id === x.id)), ...l])
+  await say($, 'page', 'restored this session’s requests, tasks and activity from the page', 'info')
 }
 
 const publishLive = async ($: EngineInterface) => {
@@ -273,40 +337,55 @@ const publishLive = async ($: EngineInterface) => {
   }
   live.isBusy = true
   try {
-    if (live.path === '') {
+    if (live.dir === '') {
       const home = (await $.process.run(['printenv', 'HOME'])).stdout.trim()
       const id = await $.session.id()
       if (!home || !id) return
-      live.path = `${home}/.claude/session-watcher/live/${id}/session-watcher.html`
+      live.dir = `${home}/.claude/session-watcher/live/${id}`
       live.sid = id
-      // The page's link, kept per session: after a restart or reload the same page is updated, not a new one made.
-      const urls = ((await $.store.get(LIVE_URLS).catch(() => undefined)) ?? {}) as Record<string, string>
-      if (!live.url && typeof urls[id] === 'string') live.url = urls[id]
+      const kept = await findPage($)
+      if (kept) ({ url: live.url, hash: live.hash } = kept)
     }
-    const page = await $.fs.read(`${$.plugin.root}/report/page.html`)
-    const state = JSON.stringify(await liveSnapshot($)).replace(/</g, '\\u003c')
-    await $.fs.write(live.path, page.replace('__STATE__', () => state))
+    if (!live.isRestored) await restore($).catch(() => undefined)
     live.last = await $.clock.now()
-    const send = async () => (await $.tool.call({
-      tool: 'Artifact',
-      file_path: live.path,
-      ...(live.url ? { url: live.url } : { icon: 'gauge', description: 'Session Watcher, live: this session’s cost, tokens, cache and activity.' }),
-    } as never)) as { deny?: string; text?: string; isError?: boolean; result?: unknown }
-    const textOf = (r: { deny?: string; text?: string; result?: unknown }) => r.deny ?? r.text ?? (typeof r.result === 'string' ? r.result : JSON.stringify(r.result ?? ''))
-    let r = await send()
-    // The first publish to a kept link after a restart is refused once, with the live version handed back; that
-    // counts as reading it, so the same publish goes through on the second try.
-    if (live.url && (r.isError || r.deny !== undefined)) r = await send()
-    const text = textOf(r)
-    const url = /https:\/\/claude\.ai\/(?:code\/)?artifact\/[\w-]+/.exec(text)?.[0]
-    if (r.deny !== undefined || r.isError) await say($, 'page', `publish failed · ${shorten(text, 60)}`, 'error')
-    else if (url && url !== live.url) {
+    const snap = await liveSnapshot($)
+    // The page's code: published when it is new or changed, with this state built in for a viewer without the database.
+    const page = await $.fs.read(`${$.plugin.root}/report/page.html`)
+    const hash = hashOf(page)
+    if (!live.url || hash !== live.hash) {
+      const file = `${live.dir}/session-watcher.html`
+      await $.fs.write(file, page.replace('__STATE__', () => JSON.stringify(snap).replace(/</g, '\\u003c')))
+      const send = async () => (await $.tool.call({
+        tool: 'Artifact', file_path: file, capabilities: PAGE_CAPS,
+        ...(live.url ? { url: live.url } : { title: PAGE_TITLE, icon: 'gauge', description: 'Session Watcher, live: every session’s cost, tokens, cache and activity, with the newest plan limits.' }),
+      } as never)) as ToolAnswer
+      let r = await send()
+      // A kept link this process has not published yet is refused once, with the live version handed back; that
+      // counts as reading it, so the same publish goes through on the second try.
+      if (live.url && failed(r)) r = await send()
+      if (failed(r)) return void (await say($, 'page', `publish failed · ${shorten(textOf(r), 60)}`, 'error'))
+      const url = URL_RE.exec(textOf(r))?.[0] ?? live.url
+      const isNew = url !== live.url
       live.url = url
-      const urls = ((await $.store.get(LIVE_URLS).catch(() => undefined)) ?? {}) as Record<string, string>
-      await $.store.set(LIVE_URLS, { ...Object.fromEntries(Object.entries(urls).slice(-20)), [live.sid]: url }).catch(() => undefined)
-      await say($, 'page', `live at ${url}`, 'done')
-      $.ui.toast(`Session Watcher page: ${url}`)
+      live.hash = hash
+      await $.store.set(SHARED, { url, hash }).catch(() => undefined)
+      if (isNew) {
+        await say($, 'page', `live at ${url}`, 'done')
+        $.ui.toast(`Session Watcher page: ${url}`)
+      }
     }
+    // The data: this session's state, and the plan limits as last read, both in one write.
+    const stateFile = `${live.dir}/state.json`
+    await $.fs.write(stateFile, JSON.stringify({ updatedAt: snap.exportedAt, sessionStart: snap.sessionStart, model: snap.vitals.model, state: snap }))
+    const limits = snap.vitals.limits.map(l => ({ kind: l.kind, pct: l.pct, resetsAt: l.resetsAt }))
+    const r = (await $.tool.call({
+      tool: 'ArtifactData', action: 'batch', url: live.url,
+      writes: [
+        { op: 'set', collection: 'sessions', doc_id: live.sid, file_path: stateFile },
+        ...(limits.length ? [{ op: 'set', collection: 'limits', doc_id: 'latest', data: { at: snap.exportedAt, session: live.sid, limits } }] : []),
+      ],
+    } as never)) as ToolAnswer
+    if (failed(r)) await say($, 'page', `update failed · ${shorten(textOf(r), 60)}`, 'error')
   } catch (err) {
     await say($, 'page', `publish failed · ${shorten(String((err as Error)?.message ?? err), 60)}`, 'error').catch(() => undefined)
   } finally {
@@ -1376,6 +1455,31 @@ export const register: Register = on => {
         {`Main card shows the live cost. This card shows the cost from the last log scan (as of ${hasScan ? hhmm(sc.at) : '—'}), which splits main thread and sub-agents. The gap is spend since that scan; it closes on the next scan.`}
       </Text>
     )
+    // By day: the transcripts' hours grouped by local day (the pane's clock), newest first.
+    const dayKey = (ms: number) => new Date(ms).toDateString()
+    const dayRows = Object.values((sc.hours ?? []).reduce<Record<string, { at: number; ms: number; u: Usage }>>((acc, x) => {
+      const d = (acc[dayKey(x.at)] ??= { at: x.at, ms: 0, u: empty() })
+      d.ms += x.ms
+      d.u = sum(d.u, x.usage)
+      return acc
+    }, {})).sort((p, q) => q.at - p.at)
+    const daysBody = () =>
+      dayRows.length === 0
+        ? [<Text key="none" dimColor>{hasScan ? 'No days in the transcripts yet.' : 'Reading the transcripts…'}</Text>]
+        : [
+            table('days', [
+              { id: 'd', label: 'DAY', kind: 'free' },
+              { id: 'c', label: 'CALLS', kind: 'num' },
+              isWide && { id: 'a', label: 'ACTIVE', kind: 'num' },
+              { id: 'u', label: 'COST', kind: 'num' },
+            ], dayRows.map(d => ({ key: String(d.at), cells: {
+              d: <Text wrap="truncate-end">{new Date(d.at).toDateString().slice(0, 10)}</Text>,
+              c: n(String(d.u.calls), { dim: true }),
+              a: n(dur(d.ms), { dim: true }),
+              u: n(usd(d.u.usd * factor), { bold: true }),
+            } }))),
+            <Text key="src" size="footnote" dimColor>Each day this session was used, from the transcripts. Days add up to Session Totals.</Text>,
+          ]
     const sessionBody = () => [
       // The total every row below adds up to: the snapshot's cost, marked while the live cost has moved past it.
       labelValue('tot', `TOTAL AT ${hasScan ? hhmm(sc.at) : '—'}${isUpdating ? ' · UPDATING' : ''}`, isLagging && hasScan ? `as of ${hhmm(sc.at)}` : '', { text: usd(snapCost), color: 'claude' }),
@@ -1719,6 +1823,7 @@ export const register: Register = on => {
     }
     const errorsNow = events.filter(l => l.kind === 'error').length
     const byId: Record<string, () => ReturnType<typeof section>> = {
+      days: () => section('days', 'By Day', dayRows.length ? `${dayRows.length} day${dayRows.length === 1 ? '' : 's'}` : '—', daysBody),
       session: () => section('session', 'Session Totals', hasScan ? `main ${usd(mainCost)} · agents ${usd(agentCost)}${isUpdating ? ' · updating' : ''}` : '—', sessionBody, costNote),
       tasks: () => section('tasks', 'Tasks', `${shownTasks.length} · now: ${last?.label ?? '—'}`, tasksBody),
       requests: () => section('requests', 'Recent Requests', `${callList.length} seen`, requestsBody),

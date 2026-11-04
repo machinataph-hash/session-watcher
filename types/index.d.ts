@@ -19,7 +19,9 @@ export type Call = {
 }
 
 /** The whole session as its transcripts hold it (main + every sub-agent), one entry per model. */
-export type Scan = { at: number; byModel: Record<string, { main: Usage; agents: Usage }>; costUsd?: number | null; cache?: CacheHealth }
+/** One clock hour of the session (UTC hour start), from the transcripts: active time and list-price usage. */
+export type Hour = { at: number; ms: number; usage: Usage }
+export type Scan = { at: number; byModel: Record<string, { main: Usage; agents: Usage }>; costUsd?: number | null; cache?: CacheHealth; hours?: Hour[] }
 
 /** Where the cache cost comes from, read from the transcripts. A rebuild is a main-thread request writing over 50k tokens. */
 export type Rebuild = { at: number; tokens: number; why: 'start' | 'idle' | 'summary' | 'other' }

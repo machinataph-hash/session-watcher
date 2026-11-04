@@ -114,16 +114,26 @@ for p in paths:
 for p in agent_paths:
     read(p, True, None)
 
+HOUR = 3_600_000
+# Per-hour buckets (UTC hour starts) so a viewer can group by its own local day.
+hours = {}
+
+
+def bucket(at):
+    return hours.setdefault(at - at % HOUR, {'ms': 0, 'byModel': {}})
+
+
 events.sort()
 ms, running, prev = 0, False, 0
 for at, end, prompt in events:
     if running and not prompt:
         ms += max(0, at - prev)
+        bucket(at)['ms'] += max(0, at - prev)
     running = not end
     prev = at
 
 by_model = {}
-for who, model, vals, _ in responses.values():
+for who, model, vals, at in responses.values():
     # a response without the split: main-thread writes are one-hour, a sub-agent's five-minute;
     # either way never more one-hour writes than writes
     one_h = vals['cacheWrite1h'] if vals.pop('split') else vals['cacheWrite'] if who == 'main' else 0
@@ -136,6 +146,11 @@ for who, model, vals, _ in responses.values():
     for f in vals:
         row[f] += vals[f]
     row['calls'] += 1
+    if at is not None:
+        h = bucket(at)['byModel'].setdefault(model, {'input': 0, 'cacheWrite': 0, 'cacheWrite1h': 0, 'cacheRead': 0, 'output': 0, 'calls': 0})
+        for f in vals:
+            h[f] += vals[f]
+        h['calls'] += 1
 # placeholder lines with no tokens at all are not requests the cache saw
 main = sorted(((at, vals) for who, _, vals, at in responses.values()
                if who == 'main' and at is not None and vals['input'] + vals['cacheWrite'] + vals['cacheRead'] > 0),
@@ -172,4 +187,4 @@ cache = {
     'memoryChars': memory_chars,
     'tools': [{'name': tool_names.get(i, '?'), 'chars': n, 'at': at or 0} for n, i, at in top],
 }
-print(json.dumps({'ms': ms, 'byModel': by_model, 'cache': cache}))
+print(json.dumps({'ms': ms, 'byModel': by_model, 'cache': cache, 'hours': [dict(at=k, **v) for k, v in sorted(hours.items())]}))
