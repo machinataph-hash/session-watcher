@@ -475,29 +475,45 @@ export const register: Register = on => {
   let ticking = false
 
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: NAME, description: 'Session Watcher: session vitals, cost and token use', argumentHint: '[open|close|reset|report|page|live on|off|<seconds>]' })
-    await $.tool.register({
+    // Each step is guarded on its own: a failure in one (a duplicate register on a reload, a store or
+    // usage read that throws) must not stop the rest, and next(e) always runs, so the slash command
+    // and both tools are listed in every session even when a later step fails.
+    const step = async (what: string, f: () => Promise<unknown>) => {
+      try {
+        await f()
+      } catch (err) {
+        await say($, 'start', `${what} failed · ${shorten(String((err as Error)?.message ?? err), 60)}`, 'error').catch(() => undefined)
+      }
+    }
+    await step('command', () => $.command.register({ name: NAME, description: 'Session Watcher: session vitals, cost and token use', argumentHint: '[open|close|reset|report|page|live on|off|<seconds>]' }))
+    await step('mark_task', () => $.tool.register({
       name: TOOL,
       description:
         'Start counting tokens under a new task label (for example "A2 build"). Every later model call, main thread and sub-agents, counts toward it until the next mark_task. Returns the totals of the task that just ended.',
       inputSchema: { type: 'object', properties: { label: { type: 'string', description: 'Short task name' } }, required: ['label'] },
       isDeferred: false,
-    })
-    await $.tool.register({
+    }))
+    await step('context_breakdown', () => $.tool.register({
       name: BREAKDOWN_TOOL,
       description: 'The context window broken down as /context shows it: categories, tokens per MCP server, memory files, agents, skills.',
       inputSchema: { type: 'object', properties: {} },
       isDeferred: true,
+    }))
+    await step('tasks', async () => {
+      const now = await $.clock.now()
+      await update($, tasks, l => (l.length === 0 ? [newTask('Unlabelled', now)] : l))
     })
-    const now = await $.clock.now()
-    await update($, tasks, l => (l.length === 0 ? [newTask('Unlabelled', now)] : l))
-    const saved = await $.store.get(LAYOUT).catch(() => undefined)
-    if (saved !== undefined) await update($, layout, () => cleanLayout(saved))
-    const liveSaved = (await $.store.get(LIVE).catch(() => undefined)) as Partial<LiveCfg> | undefined
-    live.cfg = { ...LIVE_DEFAULT, ...(liveSaved ?? {}) }
-    await update($, liveEvery, () => live.cfg.everyS)
-    await readUsage($, true)
-    void readTranscript($)
+    await step('layout', async () => {
+      const saved = await $.store.get(LAYOUT).catch(() => undefined)
+      if (saved !== undefined) await update($, layout, () => cleanLayout(saved))
+    })
+    await step('live settings', async () => {
+      const liveSaved = (await $.store.get(LIVE).catch(() => undefined)) as Partial<LiveCfg> | undefined
+      live.cfg = { ...LIVE_DEFAULT, ...(liveSaved ?? {}) }
+      await update($, liveEvery, () => live.cfg.everyS)
+    })
+    await step('usage', () => readUsage($, true))
+    void readTranscript($).catch(() => undefined)
     if (!ticking) {
       ticking = true
       $.clock.every(1000, async () => {

@@ -212,3 +212,7 @@ claude plugin test .
 ## License
 
 [MIT](LICENSE)
+
+## Releasing
+
+Sessions load the released copy at `~/.claude/mods-release/session-watcher` (named in `CLAUDE_CODE_PLUGIN_DIRS`), not this repo, so a half-finished edit here never reloads into open sessions. After a change, run `scripts/release.sh`: it validates, runs the tests (one retry for render timeouts) and swaps the new copy in whole.
